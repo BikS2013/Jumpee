@@ -1,6 +1,6 @@
 cask "jumpee" do
   version "1.0.0"
-  sha256 "ac673777db3748f044784d9ee38f4c028605b239e6f9e2f8041d75366fac1655"
+  sha256 "a96eeb0652bbb580b737c68e182346b30338a8b6d24ac070d408b8f8b099c625"
 
   # TODO: Replace with your GitHub release URL after pushing to GitHub
   # url "https://github.com/BikS2013/jumpee/releases/download/v#{version}/Jumpee-#{version}.zip"
@@ -18,6 +18,7 @@ cask "jumpee" do
   app "Jumpee.app"
 
   postflight do
+    system "xattr", "-d", "com.apple.quarantine", "#{appdir}/Jumpee.app"
     system "osascript", "-e",
       'display notification "Jumpee installed. Grant Accessibility permissions in System Settings > Privacy & Security > Accessibility." with title "Jumpee"'
   end
