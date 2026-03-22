@@ -20,7 +20,7 @@ brew tap BikS2013/jumpee
 brew install --cask jumpee
 ```
 
-Then launch from `/Applications/Jumpee.app` or Spotlight.
+The Homebrew cask automatically removes the Gatekeeper quarantine flag. Launch from `/Applications/Jumpee.app` or Spotlight.
 
 ### Uninstall
 
@@ -31,6 +31,12 @@ brew uninstall --cask jumpee
 ## Install manually
 
 Download `Jumpee-x.x.x.zip` from [Releases](https://github.com/BikS2013/Jumpee/releases), extract, and move `Jumpee.app` to `/Applications/`.
+
+Since the app is not notarized with Apple, macOS will block it on first launch. Remove the quarantine flag:
+```bash
+xattr -d com.apple.quarantine /Applications/Jumpee.app
+```
+Or: right-click `Jumpee.app` in Finder > **Open** > click **Open** in the dialog.
 
 ## Build from source
 
