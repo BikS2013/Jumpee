@@ -1,39 +1,4 @@
-# Build artifacts
 build/
-
-# Xcode
-*.xcodeproj/
-*.xcworkspace/
-xcuserdata/
-DerivedData/
-*.pbxuser
-*.mode1v3
-*.mode2v3
-*.perspectivev3
-*.hmap
-*.ipa
-*.dSYM.zip
-*.dSYM
-
-# Swift Package Manager
-.build/
-Packages/
-Package.resolved
-
-# macOS system files
+dist/
 .DS_Store
-.AppleDouble
-.LSOverride
-._*
-.Spotlight-V100
-.Trashes
-
-# IDE
 *.swp
-*.swo
-*~
-.idea/
-.vscode/
-
-# User config (runtime, not source)
-# ~/.Jumpee/config.json is outside the repo, no action needed
