@@ -10,81 +10,83 @@ A lightweight native macOS menu bar app for naming and jumping between Mission C
 - Click a desktop to jump to it instantly (menu reopens after switching)
 - Rename the active desktop via the menu
 - Displays a transparent watermark overlay on the desktop with the space name
+- Names follow desktops when reordered in Mission Control (tracked by space ID)
 - All settings persist in `~/.Jumpee/config.json`
 
-## Prerequisites
+## Install via Homebrew (recommended)
 
-### macOS Version
-- macOS 13 (Ventura) or later
-- Apple Silicon (arm64)
+```bash
+brew tap BikS2013/jumpee
+brew install --cask jumpee
+```
 
-### Swift Compiler
-- Xcode Command Line Tools must be installed:
-  ```bash
-  xcode-select --install
-  ```
+Then launch from `/Applications/Jumpee.app` or Spotlight.
 
-### Known Build Issue - SwiftBridging Module
-If you get a `redefinition of module 'SwiftBridging'` error during build, rename the stale modulemap:
+### Uninstall
+
+```bash
+brew uninstall --cask jumpee
+```
+
+## Install manually
+
+Download `Jumpee-x.x.x.zip` from [Releases](https://github.com/BikS2013/Jumpee/releases), extract, and move `Jumpee.app` to `/Applications/`.
+
+## Build from source
+
+Requires Xcode Command Line Tools:
+```bash
+xcode-select --install
+```
+
+Then:
+```bash
+cd Jumpee
+bash build.sh
+open build/Jumpee.app
+```
+
+To install the local build:
+```bash
+cp -r build/Jumpee.app /Applications/
+```
+
+### Known Build Issue — SwiftBridging Module
+If you get a `redefinition of module 'SwiftBridging'` error, rename the stale modulemap:
 ```bash
 sudo mv /Library/Developer/CommandLineTools/usr/include/swift/module.modulemap \
        /Library/Developer/CommandLineTools/usr/include/swift/module.modulemap.bak
 ```
-This may need to be re-applied after Command Line Tools updates.
 
-### Mission Control Keyboard Shortcuts
-Desktop switching requires **Ctrl+1** through **Ctrl+9** shortcuts to be enabled:
+## Post-install setup
+
+### 1. Accessibility Permissions (required)
+Jumpee needs Accessibility permissions to switch desktops. On first launch, a system dialog will prompt you.
+
+1. Open **System Settings** > **Privacy & Security** > **Accessibility**
+2. Find **Jumpee** and toggle it **ON** (or click `+` to add it)
+
+### 2. Mission Control Keyboard Shortcuts (required)
+Desktop switching requires **Ctrl+1** through **Ctrl+9** shortcuts:
 
 1. Open **System Settings** > **Keyboard** > **Keyboard Shortcuts** > **Mission Control**
 2. Enable **"Switch to Desktop 1"** through **"Switch to Desktop 9"**
-3. Ensure they are set to **Ctrl+1** through **Ctrl+9** (the defaults)
 
-Without these shortcuts, the desktop list will display correctly but clicking to navigate will not work.
-
-### Accessibility Permissions
-Jumpee requires **Accessibility** permissions to switch desktops (it uses CGEvent to simulate Ctrl+number keystrokes). On first launch, a system dialog will prompt you to grant access.
-
-1. Open **System Settings** > **Privacy & Security** > **Accessibility**
-2. Click `+` and add `Jumpee.app`
-3. Ensure it is toggled **ON**
-
-The app is ad-hoc code-signed so the permission persists across rebuilds. If you move the app to a different location, you may need to re-grant the permission.
-
-## Build
-
-```bash
-cd Jumpee
-bash build.sh
-```
-
-## Install
-
-```bash
-cp -r Jumpee/build/Jumpee.app /Applications/
-```
-
-To launch at login: **System Settings** > **General** > **Login Items** > add Jumpee.app.
-
-## Run
-
-```bash
-open Jumpee/build/Jumpee.app
-# or if installed:
-open /Applications/Jumpee.app
-```
+### 3. Launch at Login (optional)
+**System Settings** > **General** > **Login Items** > click `+` > select **Jumpee**
 
 ## Usage
 
 | Action | How |
 |--------|-----|
-| Open desktop list | Press **Cmd+J** (global hotkey) or click the menu bar item |
+| Open desktop list | **Cmd+J** (global hotkey) or click the menu bar item |
 | Jump to a desktop | **Cmd+1..9** while menu is open, or click it |
-| Rename current desktop | Click "Rename Current Desktop..." (Cmd+N) |
+| Rename current desktop | **Cmd+N** or click "Rename Current Desktop..." |
 | Toggle space number | Click "Hide/Show Space Number" |
 | Toggle overlay | Click "Enable/Disable Overlay" |
-| Edit config | Cmd+, from menu, or edit `~/.Jumpee/config.json` |
-| Reload config | Cmd+R from menu |
-| Quit | Cmd+Q from menu |
+| Edit config | **Cmd+,** from menu, or edit `~/.Jumpee/config.json` |
+| Reload config | **Cmd+R** from menu |
+| Quit | **Cmd+Q** from menu |
 
 ## Configuration
 
@@ -108,11 +110,18 @@ Config file: `~/.Jumpee/config.json`
   },
   "showSpaceNumber": true,
   "spaces": {
-    "1": "Mail",
-    "2": "Development",
-    "3": "Terminal"
+    "42": "Mail",
+    "15": "Development",
+    "8": "Terminal"
   }
 }
 ```
 
+**Note**: The `spaces` keys are macOS space IDs (assigned automatically when you rename a desktop). Do not use position numbers — Jumpee manages these keys for you.
+
 See [docs/design/configuration-guide.md](docs/design/configuration-guide.md) for full parameter reference.
+
+## System requirements
+
+- macOS 13 (Ventura) or later
+- Apple Silicon (arm64)
