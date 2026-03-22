@@ -1,0 +1,183 @@
+# Jumpee Configuration Guide
+
+## Configuration File Location
+
+**Path**: `~/.Jumpee/config.json`
+
+This is the only configuration method. There are no environment variables, CLI parameters, or fallback values. If the config file is missing, Jumpee creates it with default values on first run.
+
+The config file can be opened directly from Jumpee's menu (Cmd+, or "Open Config File..."). After editing, use "Reload Config" (Cmd+R) to apply changes without restarting.
+
+## Complete Configuration Example
+
+```json
+{
+  "hotkey": {
+    "key": "j",
+    "modifiers": ["command"]
+  },
+  "overlay": {
+    "enabled": true,
+    "fontName": "Helvetica Neue",
+    "fontSize": 72,
+    "fontWeight": "bold",
+    "margin": 40,
+    "opacity": 0.15,
+    "position": "top-center",
+    "textColor": "#FF0000"
+  },
+  "showSpaceNumber": true,
+  "spaces": {
+    "1": "Mail & Calendar",
+    "2": "Development",
+    "3": "Terminal",
+    "4": "Browser",
+    "5": "Slack"
+  }
+}
+```
+
+## Configuration Parameters
+
+### `spaces` (object)
+
+Maps desktop numbers (as strings) to custom names.
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `"1"` .. `"9"` | string | Custom name for that desktop number |
+
+- **How to set**: Use "Rename Current Desktop..." from the menu (Cmd+N), or edit the config file directly.
+- **Default**: Empty (`{}`). Unnamed desktops show as "Desktop N".
+- **Note**: Desktop numbers are ordinal positions (1st space, 2nd space, etc.). If you reorder spaces in Mission Control, the name-to-desktop mapping may shift.
+
+### `showSpaceNumber` (boolean)
+
+Controls whether the desktop number is shown alongside the custom name in the menu bar.
+
+| Value | Menu bar display |
+|-------|-----------------|
+| `true` | `4: Browser` |
+| `false` | `Browser` |
+
+- **Default**: `true`
+- **How to toggle**: Click "Hide Space Number" / "Show Space Number" in the menu.
+
+### `hotkey` (object)
+
+The global keyboard shortcut to open Jumpee's dropdown menu from anywhere.
+
+| Property | Type | Description | Default |
+|----------|------|-------------|---------|
+| `key` | string | The key to press | `"j"` |
+| `modifiers` | string[] | Modifier keys to hold | `["command"]` |
+
+**Supported key values**:
+- Letters: `"a"` through `"z"`
+- Numbers: `"0"` through `"9"`
+- Special: `"space"`, `"return"`, `"tab"`, `"escape"`
+
+**Supported modifier values**:
+- `"command"` or `"cmd"`
+- `"control"` or `"ctrl"`
+- `"option"` or `"alt"`
+- `"shift"`
+
+**Examples**:
+```json
+{"key": "j", "modifiers": ["command"]}
+{"key": "space", "modifiers": ["control", "shift"]}
+{"key": "k", "modifiers": ["command", "option"]}
+```
+
+- **Default**: Cmd+J
+- **How to change**: Edit the config file and reload (Cmd+R from menu).
+- **Implementation**: Uses Carbon `RegisterEventHotKey` API. Does not require Accessibility permissions.
+- **Note**: Avoid hotkeys that conflict with other apps. If the hotkey doesn't work, another app may have claimed it.
+
+### `overlay` (object)
+
+Controls the transparent text watermark displayed on the desktop showing the current space's name.
+
+| Property | Type | Description | Default |
+|----------|------|-------------|---------|
+| `enabled` | boolean | Show/hide the overlay | `true` |
+| `opacity` | number | Text transparency (0.0 = invisible, 1.0 = solid) | `0.15` |
+| `fontName` | string | Font family name | `"Helvetica Neue"` |
+| `fontSize` | number | Font size in points | `72` |
+| `fontWeight` | string | Font weight | `"bold"` |
+| `position` | string | Where to place the text on screen | `"top-center"` |
+| `textColor` | string | Hex color code | `"#FF0000"` |
+| `margin` | number | Distance from screen edges in pixels | `40` |
+
+**Position options**:
+
+| Value | Placement |
+|-------|-----------|
+| `"center"` | Center of the screen |
+| `"top-left"` | Top-left corner |
+| `"top-center"` | Top center |
+| `"top-right"` | Top-right corner |
+| `"bottom-left"` | Bottom-left corner |
+| `"bottom-center"` | Bottom center |
+| `"bottom-right"` | Bottom-right corner |
+
+**Font weight options**:
+
+| Value | Description |
+|-------|-------------|
+| `"ultralight"` | Thinnest weight |
+| `"thin"` | Very thin |
+| `"light"` | Light weight |
+| `"regular"` | Normal weight |
+| `"medium"` | Medium weight |
+| `"semibold"` | Semi-bold |
+| `"bold"` | Bold (default) |
+| `"heavy"` | Heavy weight |
+| `"black"` | Heaviest weight |
+
+**Font examples**:
+- `"Helvetica Neue"` (default, clean sans-serif)
+- `"SF Pro"` (macOS system font)
+- `"Menlo"` (monospace)
+- `"Georgia"` (serif)
+- Any font installed on your system
+
+**Color examples**:
+- `"#FF0000"` (red — default)
+- `"#FFFFFF"` (white — good for dark wallpapers)
+- `"#000000"` (black — good for light wallpapers)
+- `"#FF6600"` (orange)
+- `"#4A90D9"` (blue)
+
+- **How to toggle**: Click "Enable Overlay" / "Disable Overlay" in the menu.
+- **Recommended opacity**: 0.10-0.20 for subtle watermark, 0.30-0.50 for more visible text.
+
+## System Requirements
+
+### Mission Control Keyboard Shortcuts
+
+Desktop switching requires these shortcuts to be enabled:
+
+1. Open **System Settings** > **Keyboard** > **Keyboard Shortcuts** > **Mission Control**
+2. Enable **"Switch to Desktop 1"** through **"Switch to Desktop 9"** (Ctrl+1 through Ctrl+9)
+
+Without these shortcuts, the desktop list will display correctly but clicking a desktop to navigate will not work.
+
+### Accessibility Permissions
+
+Desktop switching uses `osascript` to send keystrokes. Your terminal app must have Accessibility permissions:
+
+1. Open **System Settings** > **Privacy & Security** > **Accessibility**
+2. Add and enable your terminal app (Terminal.app, iTerm2, etc.)
+
+## Applying Configuration Changes
+
+| Change | How to apply |
+|--------|-------------|
+| Rename a desktop | Use menu "Rename Current Desktop..." — saves automatically |
+| Toggle space number | Use menu toggle — saves automatically |
+| Toggle overlay | Use menu toggle — saves automatically |
+| Change hotkey | Edit config file, then Cmd+R to reload |
+| Change overlay style | Edit config file, then Cmd+R to reload |
+| Change font weight | Edit config file, then Cmd+R to reload |
