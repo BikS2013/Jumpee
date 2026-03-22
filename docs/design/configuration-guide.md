@@ -28,11 +28,9 @@ The config file can be opened directly from Jumpee's menu (Cmd+, or "Open Config
   },
   "showSpaceNumber": true,
   "spaces": {
-    "1": "Mail & Calendar",
-    "2": "Development",
-    "3": "Terminal",
-    "4": "Browser",
-    "5": "Slack"
+    "42": "Mail & Calendar",
+    "15": "Development",
+    "8": "Terminal"
   }
 }
 ```
@@ -41,15 +39,16 @@ The config file can be opened directly from Jumpee's menu (Cmd+, or "Open Config
 
 ### `spaces` (object)
 
-Maps desktop numbers (as strings) to custom names.
+Maps macOS space IDs (ManagedSpaceID as strings) to custom names. Names follow the desktop content when spaces are reordered in Mission Control.
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `"1"` .. `"9"` | string | Custom name for that desktop number |
+| `"<spaceID>"` | string | Custom name for the desktop with that space ID |
 
-- **How to set**: Use "Rename Current Desktop..." from the menu (Cmd+N), or edit the config file directly.
+- **How to set**: Use "Rename Current Desktop..." from the menu (Cmd+N). The space ID is stored automatically.
 - **Default**: Empty (`{}`). Unnamed desktops show as "Desktop N".
-- **Note**: Desktop numbers are ordinal positions (1st space, 2nd space, etc.). If you reorder spaces in Mission Control, the name-to-desktop mapping may shift.
+- **Migration**: If upgrading from a position-based config (keys "1", "2", ...), Jumpee automatically migrates to space-ID keys on first launch.
+- **Note**: Space IDs are assigned by macOS when a desktop is created and remain stable across reorders. If you manually edit the config, use the space IDs shown in the file (do not use position numbers).
 
 ### `showSpaceNumber` (boolean)
 

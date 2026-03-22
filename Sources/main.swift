@@ -197,6 +197,12 @@ class SpaceDetector {
     func getSpaceCount() -> Int {
         return getAllSpaceIDs().count
     }
+
+    func getOrderedSpaces() -> [(position: Int, spaceID: Int)] {
+        return getAllSpaceIDs().enumerated().map { (index, id) in
+            (position: index + 1, spaceID: id)
+        }
+    }
 }
 
 // MARK: - Overlay Window
@@ -318,7 +324,8 @@ class OverlayManager {
         guard let screen = NSScreen.main else { return }
         guard let spaceIndex = spaceDetector.getCurrentSpaceIndex() else { return }
 
-        let key = String(spaceIndex)
+        let spaceID = spaceDetector.getCurrentSpaceID()
+        let key = String(spaceID)
         let customName = config.spaces[key]
 
         let displayText: String
@@ -464,6 +471,7 @@ class MenuBarController: NSObject {
         config = JumpeeConfig.load()
         overlayManager = OverlayManager(spaceDetector: spaceDetector)
         super.init()
+        migratePositionBasedConfig()
         setupMenu()
         updateTitle()
         registerForSpaceChanges()
@@ -479,6 +487,36 @@ class MenuBarController: NSObject {
 
     func openMenu() {
         statusItem.button?.performClick(nil)
+    }
+
+    private func migratePositionBasedConfig() {
+        guard !config.spaces.isEmpty else { return }
+
+        let allSpaceIDs = spaceDetector.getAllSpaceIDs()
+        let spaceCount = allSpaceIDs.count
+        guard spaceCount > 0 else { return }
+
+        // Check if all keys are position-based (integers in 1...spaceCount)
+        let allPositionBased = config.spaces.keys.allSatisfy { key in
+            guard let pos = Int(key) else { return false }
+            return pos >= 1 && pos <= spaceCount
+        }
+
+        guard allPositionBased else { return }
+
+        // Migrate
+        var migratedSpaces: [String: String] = [:]
+        for (positionKey, name) in config.spaces {
+            let positionIndex = Int(positionKey)! - 1
+            if positionIndex < allSpaceIDs.count {
+                let newKey = String(allSpaceIDs[positionIndex])
+                migratedSpaces[newKey] = name
+            }
+        }
+
+        config.spaces = migratedSpaces
+        config.save()
+        print("[Jumpee] Migrated \(migratedSpaces.count) space name(s) from position-based to space-ID-based keys.")
     }
 
     private func setupMenu() {
@@ -539,7 +577,7 @@ class MenuBarController: NSObject {
             return
         }
 
-        let key = String(index)
+        let key = String(spaceDetector.getCurrentSpaceID())
         if let customName = config.spaces[key], !customName.isEmpty {
             if config.showSpaceNumber {
                 statusItem.button?.title = "\(index): \(customName)"
@@ -567,27 +605,27 @@ class MenuBarController: NSObject {
             }
         }
 
-        let spaceCount = spaceDetector.getSpaceCount()
-        let currentIndex = spaceDetector.getCurrentSpaceIndex()
+        let orderedSpaces = spaceDetector.getOrderedSpaces()
+        let currentSpaceID = spaceDetector.getCurrentSpaceID()
 
-        for i in 1...spaceCount {
-            let key = String(i)
+        for (position, spaceID) in orderedSpaces {
+            let key = String(spaceID)
             let customName = config.spaces[key]
 
             let displayName: String
             if let name = customName, !name.isEmpty {
-                displayName = "Desktop \(i) - \(name)"
+                displayName = "Desktop \(position) - \(name)"
             } else {
-                displayName = "Desktop \(i)"
+                displayName = "Desktop \(position)"
             }
 
-            let keyEquiv = i <= 9 ? String(i) : ""
+            let keyEquiv = position <= 9 ? String(position) : ""
             let item = NSMenuItem(title: displayName, action: #selector(navigateToSpace(_:)), keyEquivalent: keyEquiv)
             item.keyEquivalentModifierMask = .command
             item.target = self
-            item.tag = i
+            item.tag = position
 
-            if i == currentIndex {
+            if currentSpaceID == spaceID {
                 item.state = .on
             }
 
@@ -639,7 +677,8 @@ class MenuBarController: NSObject {
 
     @objc private func renameActiveSpace() {
         guard let spaceIndex = spaceDetector.getCurrentSpaceIndex() else { return }
-        let key = String(spaceIndex)
+        let spaceID = spaceDetector.getCurrentSpaceID()
+        let key = String(spaceID)
         let currentName = config.spaces[key] ?? ""
 
         let alert = NSAlert()
