@@ -1,6 +1,6 @@
 cask "jumpee" do
-  version "1.0.0"
-  sha256 "8183f91aeea65cfc58216dbbb40deed398bc184220507569dac44368d6e3de78"
+  version "1.1.0"
+  sha256 "d22dfa03fb73903e0916c7bf46f4116b4738b30c13faf7ea8ff8a3aea3455435"
 
   # TODO: Replace with your GitHub release URL after pushing to GitHub
   # url "https://github.com/BikS2013/jumpee/releases/download/v#{version}/Jumpee-#{version}.zip"

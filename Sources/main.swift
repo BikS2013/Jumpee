@@ -157,6 +157,17 @@ func fontWeight(from string: String) -> NSFont.Weight {
 
 // MARK: - Space Detection
 
+struct SpaceInfo {
+    let spaceID: Int
+    let localPosition: Int    // 1-based position within this display
+    let globalPosition: Int   // 1-based position across all displays
+}
+
+struct DisplayInfo {
+    let displayID: String     // UUID from CGSCopyManagedDisplaySpaces
+    let spaces: [SpaceInfo]
+}
+
 class SpaceDetector {
     let connectionID: Int32
 
@@ -202,6 +213,82 @@ class SpaceDetector {
         return getAllSpaceIDs().enumerated().map { (index, id) in
             (position: index + 1, spaceID: id)
         }
+    }
+
+    func getSpacesByDisplay() -> [DisplayInfo] {
+        let spacesInfo = CGSCopyManagedDisplaySpaces(connectionID) as! [[String: Any]]
+        var displays: [DisplayInfo] = []
+        var globalCounter = 0
+
+        for display in spacesInfo {
+            let displayID = display["Display Identifier"] as? String ?? "Unknown"
+            var spaces: [SpaceInfo] = []
+            var localCounter = 0
+
+            if let spaceList = display["Spaces"] as? [[String: Any]] {
+                for space in spaceList {
+                    if let spaceID = space["ManagedSpaceID"] as? Int,
+                       let type = space["type"] as? Int, type == 0 {
+                        localCounter += 1
+                        globalCounter += 1
+                        spaces.append(SpaceInfo(
+                            spaceID: spaceID,
+                            localPosition: localCounter,
+                            globalPosition: globalCounter
+                        ))
+                    }
+                }
+            }
+
+            if !spaces.isEmpty {
+                displays.append(DisplayInfo(displayID: displayID, spaces: spaces))
+            }
+        }
+        return displays
+    }
+
+    func getActiveDisplayID() -> String? {
+        let currentID = getCurrentSpaceID()
+        let displays = getSpacesByDisplay()
+        for display in displays {
+            if display.spaces.contains(where: { $0.spaceID == currentID }) {
+                return display.displayID
+            }
+        }
+        return displays.first?.displayID
+    }
+
+    func getCurrentSpaceInfo() -> (displayID: String, localPosition: Int, globalPosition: Int, spaceID: Int)? {
+        let currentID = getCurrentSpaceID()
+        let displays = getSpacesByDisplay()
+        for display in displays {
+            if let space = display.spaces.first(where: { $0.spaceID == currentID }) {
+                return (displayID: display.displayID, localPosition: space.localPosition,
+                        globalPosition: space.globalPosition, spaceID: space.spaceID)
+            }
+        }
+        return nil
+    }
+
+    func displayIDToScreen(_ displayID: String) -> NSScreen? {
+        for screen in NSScreen.screens {
+            guard let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
+                continue
+            }
+            if displayID == "Main" {
+                if screenNumber == CGMainDisplayID() {
+                    return screen
+                }
+            } else {
+                if let uuid = CGDisplayCreateUUIDFromDisplayID(screenNumber) {
+                    let uuidString = CFUUIDCreateString(nil, uuid.takeUnretainedValue()) as String?
+                    if let uuidStr = uuidString, uuidStr.caseInsensitiveCompare(displayID) == .orderedSame {
+                        return screen
+                    }
+                }
+            }
+        }
+        return NSScreen.main
     }
 }
 
@@ -321,28 +408,29 @@ class OverlayManager {
             return
         }
 
-        guard let screen = NSScreen.main else { return }
-        guard let spaceIndex = spaceDetector.getCurrentSpaceIndex() else { return }
+        guard let spaceInfo = spaceDetector.getCurrentSpaceInfo() else { return }
+        let screen = spaceDetector.displayIDToScreen(spaceInfo.displayID) ?? NSScreen.main
+        guard let targetScreen = screen else { return }
 
-        let spaceID = spaceDetector.getCurrentSpaceID()
-        let key = String(spaceID)
+        let key = String(spaceInfo.spaceID)
         let customName = config.spaces[key]
 
         let displayText: String
         if let name = customName, !name.isEmpty {
             if config.showSpaceNumber {
-                displayText = "\(spaceIndex): \(name)"
+                displayText = "\(spaceInfo.localPosition): \(name)"
             } else {
                 displayText = name
             }
         } else {
-            displayText = "Desktop \(spaceIndex)"
+            displayText = "Desktop \(spaceInfo.localPosition)"
         }
 
         if let existing = overlayWindow {
+            existing.setFrame(targetScreen.frame, display: true)
             existing.updateText(displayText, config: config.overlay)
         } else {
-            let window = OverlayWindow(screen: screen, text: displayText, config: config.overlay)
+            let window = OverlayWindow(screen: targetScreen, text: displayText, config: config.overlay)
             window.orderFront(nil)
             overlayWindow = window
         }
@@ -572,20 +660,20 @@ class MenuBarController: NSObject {
     }
 
     func updateTitle() {
-        guard let index = spaceDetector.getCurrentSpaceIndex() else {
+        guard let spaceInfo = spaceDetector.getCurrentSpaceInfo() else {
             statusItem.button?.title = "?"
             return
         }
 
-        let key = String(spaceDetector.getCurrentSpaceID())
+        let key = String(spaceInfo.spaceID)
         if let customName = config.spaces[key], !customName.isEmpty {
             if config.showSpaceNumber {
-                statusItem.button?.title = "\(index): \(customName)"
+                statusItem.button?.title = "\(spaceInfo.localPosition): \(customName)"
             } else {
                 statusItem.button?.title = customName
             }
         } else {
-            statusItem.button?.title = "Desktop \(index)"
+            statusItem.button?.title = "Desktop \(spaceInfo.localPosition)"
         }
     }
 
@@ -605,33 +693,74 @@ class MenuBarController: NSObject {
             }
         }
 
-        let orderedSpaces = spaceDetector.getOrderedSpaces()
+        let displays = spaceDetector.getSpacesByDisplay()
         let currentSpaceID = spaceDetector.getCurrentSpaceID()
+        let activeDisplayID = spaceDetector.getActiveDisplayID()
 
-        for (position, spaceID) in orderedSpaces {
-            let key = String(spaceID)
-            let customName = config.spaces[key]
+        for display in displays {
+            let isActiveDisplay = display.displayID == activeDisplayID
 
-            let displayName: String
-            if let name = customName, !name.isEmpty {
-                displayName = "Desktop \(position) - \(name)"
+            // Display header
+            let screenCount = displays.count
+            let displayLabel: String
+            if screenCount > 1 {
+                if let screen = spaceDetector.displayIDToScreen(display.displayID) {
+                    displayLabel = isActiveDisplay ? "Display: \(screen.localizedName) (active)" : "Display: \(screen.localizedName)"
+                } else {
+                    displayLabel = isActiveDisplay ? "Display (active)" : "Display"
+                }
             } else {
-                displayName = "Desktop \(position)"
+                displayLabel = "Desktops"
             }
 
-            let keyEquiv = position <= 9 ? String(position) : ""
-            let item = NSMenuItem(title: displayName, action: #selector(navigateToSpace(_:)), keyEquivalent: keyEquiv)
-            item.keyEquivalentModifierMask = .command
-            item.target = self
-            item.tag = position
-
-            if currentSpaceID == spaceID {
-                item.state = .on
+            if screenCount > 1 {
+                let headerItem = NSMenuItem(title: displayLabel, action: nil, keyEquivalent: "")
+                headerItem.isEnabled = false
+                let headerFont = NSFont.boldSystemFont(ofSize: 11)
+                headerItem.attributedTitle = NSAttributedString(string: displayLabel, attributes: [.font: headerFont])
+                menu.insertItem(headerItem, at: insertIndex)
+                spaceMenuItems.append(headerItem)
+                insertIndex += 1
             }
 
-            menu.insertItem(item, at: insertIndex)
-            spaceMenuItems.append(item)
-            insertIndex += 1
+            for space in display.spaces {
+                let key = String(space.spaceID)
+                let customName = config.spaces[key]
+
+                let displayName: String
+                if let name = customName, !name.isEmpty {
+                    displayName = "Desktop \(space.localPosition) - \(name)"
+                } else {
+                    displayName = "Desktop \(space.localPosition)"
+                }
+
+                // Cmd+1-9 shortcuts only for the active display
+                let keyEquiv = (isActiveDisplay && space.localPosition <= 9) ? String(space.localPosition) : ""
+                let item = NSMenuItem(title: displayName, action: #selector(navigateToSpace(_:)), keyEquivalent: keyEquiv)
+                item.keyEquivalentModifierMask = .command
+                item.target = self
+                item.tag = space.globalPosition  // global position for navigation
+
+                if currentSpaceID == space.spaceID {
+                    item.state = .on
+                }
+
+                if !isActiveDisplay {
+                    item.indentationLevel = 1
+                }
+
+                menu.insertItem(item, at: insertIndex)
+                spaceMenuItems.append(item)
+                insertIndex += 1
+            }
+
+            // Separator between displays
+            if displays.count > 1 && display.displayID != displays.last?.displayID {
+                let sep = NSMenuItem.separator()
+                menu.insertItem(sep, at: insertIndex)
+                spaceMenuItems.append(sep)
+                insertIndex += 1
+            }
         }
 
         let renameItem = NSMenuItem(title: "Rename Current Desktop...", action: #selector(renameActiveSpace), keyEquivalent: "n")
@@ -654,6 +783,12 @@ class MenuBarController: NSObject {
             selector: #selector(spaceDidChange),
             name: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersDidChange),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil)
     }
 
     @objc private func spaceDidChange(_ notification: Notification) {
@@ -661,25 +796,29 @@ class MenuBarController: NSObject {
         overlayManager.updateOverlay(config: config)
     }
 
+    @objc private func screenParametersDidChange(_ notification: Notification) {
+        updateTitle()
+        overlayManager.updateOverlay(config: config)
+    }
+
     @objc private func navigateToSpace(_ sender: NSMenuItem) {
-        let spaceIndex = sender.tag
-        let currentIndex = spaceDetector.getCurrentSpaceIndex()
-        if spaceIndex != currentIndex {
+        let globalPosition = sender.tag
+        guard let currentInfo = spaceDetector.getCurrentSpaceInfo() else { return }
+        if globalPosition != currentInfo.globalPosition {
             statusItem.menu?.cancelTracking()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                SpaceNavigator.navigateToSpace(index: spaceIndex)
+                SpaceNavigator.navigateToSpace(index: globalPosition)
             }
         }
     }
 
     @objc private func renameActiveSpace() {
-        guard let spaceIndex = spaceDetector.getCurrentSpaceIndex() else { return }
-        let spaceID = spaceDetector.getCurrentSpaceID()
-        let key = String(spaceID)
+        guard let spaceInfo = spaceDetector.getCurrentSpaceInfo() else { return }
+        let key = String(spaceInfo.spaceID)
         let currentName = config.spaces[key] ?? ""
 
         let alert = NSAlert()
-        alert.messageText = "Rename Desktop \(spaceIndex)"
+        alert.messageText = "Rename Desktop \(spaceInfo.localPosition)"
         alert.informativeText = "Enter a custom name for this desktop:"
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Clear Name")
