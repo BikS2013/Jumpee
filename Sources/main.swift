@@ -666,11 +666,8 @@ class MenuBarController: NSObject {
         let currentIndex = spaceDetector.getCurrentSpaceIndex()
         if spaceIndex != currentIndex {
             statusItem.menu?.cancelTracking()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 SpaceNavigator.navigateToSpace(index: spaceIndex)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    self?.openMenu()
-                }
             }
         }
     }
