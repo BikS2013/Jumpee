@@ -1,6 +1,6 @@
 # Jumpee - Functional Requirements
 
-**Last updated:** 2026-04-10
+**Last updated:** 2026-04-10 (v1.3.0 features added)
 
 ---
 
@@ -51,7 +51,7 @@ Jumpee responds to display connection and disconnection events (`didChangeScreen
 
 ---
 
-## 3. Move Window to Desktop (Proposed - plan-004)
+## 3. Move Window to Desktop (v1.2 - Implemented)
 
 ### FR-14: Move Focused Window to Target Desktop
 The user can move the currently focused (frontmost) application window from the current desktop to a specified target desktop. The operation uses synthesized macOS system keyboard shortcuts (Ctrl+Shift+N).
@@ -78,7 +78,60 @@ Fullscreen windows, "Assign to All Desktops" windows, and system UI elements can
 
 ---
 
-## 4. Non-Functional Requirements
+## 4. Move Window Global Hotkey (Proposed - plan-005)
+
+### FR-21: Global Move Window Hotkey
+A second global hotkey (default: Cmd+M), registered via Carbon `RegisterEventHotKey`, opens a floating popup menu at the mouse cursor listing all desktops on the active display (excluding the current one). Selecting a desktop moves the focused window to that desktop using the existing `WindowMover.moveToSpace()` mechanism.
+
+**Prerequisite:** `moveWindow.enabled` must be true in the config. When disabled, the hotkey is not registered.
+
+### FR-22: Move Window Hotkey Configuration
+The move-window hotkey is independently configurable via the `moveWindowHotkey` key in `~/.Jumpee/config.json`, using the same schema as the main `hotkey` (key + modifiers). When absent and `moveWindow.enabled` is true, it defaults to Cmd+M.
+
+### FR-23: Multi-Hotkey Coexistence
+Both the dropdown hotkey (default Cmd+J) and the move-window hotkey (default Cmd+M) work simultaneously. They are dispatched via distinct `EventHotKeyID.id` values within a shared Carbon event handler.
+
+### FR-24: Hotkey Reload
+Reloading config (Cmd+R) re-registers both hotkeys with any updated key/modifier combinations.
+
+---
+
+## 5. Hotkey Configuration UI (Proposed - plan-005)
+
+### FR-25: Hotkey Menu Section
+A "Hotkeys:" section in the Jumpee dropdown menu displays the current hotkey combination for each configurable hotkey. The section appears between the overlay toggle and the "Open Config File..." item.
+
+### FR-26: Hotkey Editor Dialog
+Clicking a hotkey menu item opens a modal NSAlert with an accessory view containing a key text field and modifier checkboxes (Command, Control, Option, Shift). The dialog has "Save", "Reset to Default", and "Cancel" buttons.
+
+### FR-27: Hotkey Validation
+The editor validates that: (a) at least one modifier is selected, (b) the key is in the supported key map (a-z, 0-9, space, return, tab, escape), and (c) the combination does not conflict with the other Jumpee hotkey. Invalid input produces a descriptive error alert.
+
+### FR-28: Immediate Hotkey Application
+Saving a hotkey via the editor dialog immediately updates the config file and re-registers the hotkey -- no manual reload (Cmd+R) is required.
+
+### FR-29: Hotkey Reset to Default
+The "Reset to Default" button restores the original hotkey for the selected slot: Cmd+J for the dropdown hotkey, Cmd+M for the move-window hotkey.
+
+### FR-30: Conditional Move Window Hotkey Editor
+The move-window hotkey editor menu item is only visible when `moveWindow.enabled` is true in the config.
+
+---
+
+## 6. About Dialog (Proposed - plan-005)
+
+### FR-31: About Menu Item
+An "About Jumpee..." menu item is placed after the "Jumpee" header and before the "Desktops:" separator. It has no keyboard shortcut.
+
+### FR-32: About Dialog Content
+The About dialog is an `NSAlert` with `.informational` style displaying: the app version (read from `Bundle.main.infoDictionary["CFBundleShortVersionString"]`, fallback to "dev"), a brief app description, macOS setup requirements (Accessibility permissions, Desktop Switching Shortcuts, Window Moving Shortcuts), and configuration file location with menu shortcuts.
+
+### FR-33: Runtime Version Source
+The version string is read from the app bundle's Info.plist at runtime, not hardcoded. When running unpackaged, "dev" is shown.
+
+---
+
+## 7. Non-Functional Requirements
 
 ### NFR-1: Lightweight Footprint
 Jumpee is a single-file Swift app (~130KB compiled) with no external dependencies. The build uses a single `swiftc` invocation via `build.sh`.

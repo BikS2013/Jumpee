@@ -1,6 +1,6 @@
 cask "jumpee" do
-  version "1.2.2"
-  sha256 "be6b0387daae92046b3879448540574df0a16ac3939fd1a31659149133450d32"
+  version "1.3.0"
+  sha256 "cec5de20918f130f881ceeb8a413fdc89ae25069ac2d85c48940a6492498814d"
 
   url "https://github.com/BikS2013/Jumpee/releases/download/v#{version}/Jumpee-#{version}.zip"
   name "Jumpee"
@@ -31,6 +31,8 @@ cask "jumpee" do
     To start Jumpee at login:
       System Settings > General > Login Items > add Jumpee
 
-    Global hotkey: Cmd+J (configurable in ~/.Jumpee/config.json)
+    Global hotkeys (configurable from the Hotkeys section in the menu):
+      Cmd+J — open dropdown menu
+      Cmd+M — move focused window to another desktop (requires moveWindow.enabled)
   EOS
 end

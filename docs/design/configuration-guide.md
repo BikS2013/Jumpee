@@ -16,6 +16,13 @@ The config file can be opened directly from Jumpee's menu (Cmd+, or "Open Config
     "key": "j",
     "modifiers": ["command"]
   },
+  "moveWindow": {
+    "enabled": true
+  },
+  "moveWindowHotkey": {
+    "key": "m",
+    "modifiers": ["command", "shift"]
+  },
   "overlay": {
     "enabled": true,
     "fontName": "Helvetica Neue",
@@ -90,9 +97,24 @@ The global keyboard shortcut to open Jumpee's dropdown menu from anywhere.
 ```
 
 - **Default**: Cmd+J
-- **How to change**: Edit the config file and reload (Cmd+R from menu).
+- **How to change**: Click "Dropdown Hotkey: ..." in the Hotkeys section of the menu, or edit the config file and reload (Cmd+R).
 - **Implementation**: Uses Carbon `RegisterEventHotKey` API. Does not require Accessibility permissions.
 - **Note**: Avoid hotkeys that conflict with other apps. If the hotkey doesn't work, another app may have claimed it.
+
+### `moveWindowHotkey` (object, optional)
+
+The global keyboard shortcut to open the "Move Window to Desktop N" popup menu at the mouse cursor. Only active when `moveWindow.enabled` is `true`.
+
+| Property | Type | Description | Default |
+|----------|------|-------------|---------|
+| `key` | string | The key to press | `"m"` |
+| `modifiers` | string[] | Modifier keys to hold | `["command"]` |
+
+Same supported key and modifier values as the `hotkey` property above.
+
+- **Default**: Cmd+M (when omitted from config and `moveWindow.enabled` is `true`). This is a documented exception to the no-default-fallback rule.
+- **How to change**: Click "Move Window Hotkey: ..." in the Hotkeys section of the menu, or edit the config file and reload (Cmd+R).
+- **Note**: The default Cmd+M conflicts with the system "Minimize" shortcut. Consider using Cmd+Shift+M or another combination to avoid this conflict.
 
 ### `overlay` (object)
 
@@ -177,6 +199,7 @@ Desktop switching uses `osascript` to send keystrokes. Your terminal app must ha
 | Rename a desktop | Use menu "Rename Current Desktop..." — saves automatically |
 | Toggle space number | Use menu toggle — saves automatically |
 | Toggle overlay | Use menu toggle — saves automatically |
-| Change hotkey | Edit config file, then Cmd+R to reload |
+| Change dropdown hotkey | Click "Dropdown Hotkey: ..." in menu, or edit config + Cmd+R |
+| Change move-window hotkey | Click "Move Window Hotkey: ..." in menu, or edit config + Cmd+R |
 | Change overlay style | Edit config file, then Cmd+R to reload |
 | Change font weight | Edit config file, then Cmd+R to reload |

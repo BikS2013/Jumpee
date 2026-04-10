@@ -684,3 +684,123 @@ spaceDidChange()
 | Overlay window bleeds across screens when repositioned | Low | Use `screen.frame` (global coordinates) with `setFrame(_:display:)`. The global coordinate system ensures each screen has a unique frame origin. |
 | "Displays have separate Spaces" OFF mode | Low | `CGSCopyManagedDisplaySpaces` returns a single display entry. All methods naturally fall back to single-display behavior — `localPosition == globalPosition`, one `DisplayInfo` element, overlay on the only screen. |
 | Private API behavior changes in future macOS versions | Medium | No new private APIs introduced. All new code uses public APIs (`CGDisplayCreateUUIDFromDisplayID`, `CGMainDisplayID`, `NSScreen`). Same baseline risk as current codebase. |
+
+## Move Window Hotkey, Hotkey Configuration UI, About Dialog (v1.3.0)
+
+This section describes the technical design for three features added in v1.3.0. The full technical design is in `docs/design/technical-design-v1.3.0-hotkey-about.md`. The implementation plan is in `docs/design/plan-005-hotkey-about-features.md`.
+
+### Feature Summary
+
+| Feature | Description |
+|---------|-------------|
+| Move Window Hotkey | Second global Carbon hotkey (default Cmd+M) opens a popup menu at the cursor to move the focused window to another desktop |
+| Hotkey Configuration UI | In-app modal NSAlert dialogs to edit hotkey bindings without manual JSON editing |
+| About Dialog | "About Jumpee..." menu item showing version (from Info.plist), setup instructions, and config info |
+
+### Architecture Changes
+
+#### Dual-Hotkey Carbon Event System
+
+```
++-----------------------------------+
+|   macOS Carbon Event System       |
+|   (kEventHotKeyPressed)           |
++-----------------+-----------------+
+                  |
+                  v
++-----------------+-----------------+
+| hotkeyEventHandler()             |
+| (free function, C callback)      |
+|                                  |
+| GetEventParameter -> hotKeyID    |
+|                                  |
+|   id==1 --> openMenu()           |  Status item dropdown
+|   id==2 --> openMoveWindowMenu() |  Floating popup at cursor
++----------------------------------+
+                  ^
+                  |  (registered by)
++----------------------------------+
+| GlobalHotkeyManager              |
+|                                  |
+| hotkeyRef       (id=1, Cmd+J)   |  Always registered
+| moveWindowHotkeyRef (id=2, Cmd+M)|  Only if moveWindow.enabled
+| handlerRef      (shared handler) |
+|                                  |
+| register(config:moveWindowConfig:)|
+| unregister() -- cleans up both   |
++----------------------------------+
+```
+
+The Carbon event handler uses `GetEventParameter` with `kEventParamDirectObject`/`typeEventHotKeyID` to extract the `EventHotKeyID` struct from each event. The `id` field (UInt32) distinguishes hotkey 1 (dropdown) from hotkey 2 (move window). A single `InstallEventHandler` call handles both hotkeys; each `RegisterEventHotKey` produces a separate `EventHotKeyRef`.
+
+#### Configuration Schema Extension
+
+One new optional property added to `JumpeeConfig`:
+
+```json
+{
+    "hotkey": { "key": "j", "modifiers": ["command"] },
+    "moveWindowHotkey": { "key": "m", "modifiers": ["command"] },
+    "moveWindow": { "enabled": true },
+    "overlay": { "..." },
+    "showSpaceNumber": true,
+    "spaces": { "..." }
+}
+```
+
+- `moveWindowHotkey` is optional. When absent and `moveWindow.enabled` is true, defaults to Cmd+M.
+- This is a documented exception to the project's "no default fallback" rule (recorded in the project's memory file).
+- A computed property `effectiveMoveWindowHotkey` centralizes the default logic.
+- Backward compatible: existing configs without `moveWindowHotkey` load without error.
+
+#### Menu Layout After v1.3.0
+
+```
+About Jumpee...
+Jumpee (bold header, disabled)
+---
+Desktops:
+  [display header, if multi-display]
+  [dynamic space items with Cmd+1-9]
+  Rename Current Desktop...         Cmd+N        tag=200
+  Move Window To... >               [submenu]    (if moveWindow.enabled)
+---
+Hide Space Number                                tag=100
+Disable Overlay                                  tag=101
+---
+Hotkeys:                            (disabled)
+  Dropdown Hotkey: Cmd+J...                      tag=300
+  Move Window Hotkey: Cmd+M...                   tag=301 (hidden if disabled)
+---
+Open Config File...                 Cmd+,
+Reload Config                       Cmd+R
+---
+Quit Jumpee                         Cmd+Q
+```
+
+### New Components
+
+1. **Move Window Popup** (`openMoveWindowMenu()` on `MenuBarController`) -- Builds a temporary `NSMenu` listing desktops on the active display (excluding current), pops it up at `NSEvent.mouseLocation` using `NSMenu.popUp(positioning:at:in:)` with `in: nil` (screen coordinates). Selection handler `moveWindowFromPopup(_:)` uses the same 300ms delay + `WindowMover.moveToSpace()` pattern as the existing submenu.
+
+2. **Hotkey Editor** (`editHotkey(slot:)` on `MenuBarController`) -- `NSAlert` with accessory view containing a key text field and four modifier checkboxes (Command, Control, Option, Shift). Three validation rules: at least one modifier, key in `HotkeyConfig.keyCode` map, no conflict with the other Jumpee hotkey. On save: mutates config, calls `config.save()`, re-registers both hotkeys via `reRegisterHotkeys()`.
+
+3. **About Dialog** (`showAboutDialog()` on `MenuBarController`) -- Standard `NSAlert` with `.informational` style. Version read from `Bundle.main.infoDictionary?["CFBundleShortVersionString"]` with fallback to `"dev"` when running unpackaged. Includes Accessibility permissions, desktop shortcut, and config file instructions.
+
+4. **HotkeySlot enum** -- Private enum with cases `.dropdown` and `.moveWindow`, used by `editHotkey(slot:)` to determine which config property to edit.
+
+### Integration with Existing Code
+
+- `GlobalHotkeyManager.register()` signature changes from `(config: HotkeyConfig)` to `(config: HotkeyConfig, moveWindowConfig: HotkeyConfig?)`.
+- Three call sites updated: `MenuBarController.init()`, `reloadConfig(_:)`, and the new `reRegisterHotkeys()` helper.
+- `rebuildSpaceItems()` extended to update hotkey menu item titles (tags 300, 301) and toggle visibility of tag 301 based on `moveWindow.enabled`.
+- `setupMenu()` extended with About item (after header) and Hotkeys section (between overlay toggle and config items).
+- `build.sh` version bumped from 1.2.2 to 1.3.0.
+
+### Risks
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Cmd+M conflicts with system Minimize shortcut | Medium | Documented; configurable via Hotkey Config UI |
+| Popup steals focus, WindowMover fails | Medium | 300ms delay (proven pattern); can capture AXUIElement before popup if needed |
+| Multi-monitor popup positioning | Low | `NSEvent.mouseLocation` + `in: nil` uses global screen coordinates |
+| User enters unsupported key in editor | Low | Validated against `HotkeyConfig.keyCode` map; error shown |

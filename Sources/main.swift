@@ -116,6 +116,13 @@ struct JumpeeConfig: Codable {
     var overlay: OverlayConfig
     var hotkey: HotkeyConfig
     var moveWindow: MoveWindowConfig?
+    var moveWindowHotkey: HotkeyConfig?
+
+    /// Resolved move-window hotkey: explicit config or default Cmd+M.
+    /// Documented exception to the no-default-fallback rule (see Issues - Pending Items.md).
+    var effectiveMoveWindowHotkey: HotkeyConfig {
+        return moveWindowHotkey ?? HotkeyConfig(key: "m", modifiers: ["command"])
+    }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".Jumpee")
@@ -639,30 +646,55 @@ class WindowMover {
     }
 }
 
+// MARK: - Hotkey Slot
+
+private enum HotkeySlot {
+    case dropdown
+    case moveWindow
+}
+
 // MARK: - Global Hotkey Manager (Carbon API)
 
 private var globalMenuBarController: MenuBarController?
 
 func hotkeyEventHandler(nextHandler: EventHandlerCallRef?, event: EventRef?, userData: UnsafeMutableRawPointer?) -> OSStatus {
+    var hotKeyID = EventHotKeyID()
+    let status = GetEventParameter(
+        event,
+        EventParamName(kEventParamDirectObject),
+        EventParamType(typeEventHotKeyID),
+        nil,
+        MemoryLayout<EventHotKeyID>.size,
+        nil,
+        &hotKeyID
+    )
+    guard status == noErr else { return status }
+
     DispatchQueue.main.async {
-        globalMenuBarController?.openMenu()
+        switch hotKeyID.id {
+        case 1:
+            globalMenuBarController?.openMenu()
+        case 2:
+            globalMenuBarController?.openMoveWindowMenu()
+        default:
+            break
+        }
     }
     return noErr
 }
 
 class GlobalHotkeyManager {
     private var hotkeyRef: EventHotKeyRef?
+    private var moveWindowHotkeyRef: EventHotKeyRef?
     private var handlerRef: EventHandlerRef?
-    private let hotkeyID = EventHotKeyID(signature: OSType(0x4A4D_5045), id: 1) // "JMPE"
 
-    func register(config: HotkeyConfig) {
+    func register(config: HotkeyConfig, moveWindowConfig: HotkeyConfig?) {
         unregister()
 
-        guard let keyCode = config.keyCode else { return }
-        let carbonModifiers = config.carbonModifiers
-
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
         InstallEventHandler(
             GetApplicationEventTarget(),
             hotkeyEventHandler,
@@ -672,21 +704,41 @@ class GlobalHotkeyManager {
             &handlerRef
         )
 
-        let hotKeyID = hotkeyID
-        RegisterEventHotKey(
-            UInt32(keyCode),
-            carbonModifiers,
-            hotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &hotkeyRef
-        )
+        // Register main dropdown hotkey (id=1)
+        if let keyCode = config.keyCode {
+            let dropdownID = EventHotKeyID(signature: OSType(0x4A4D_5045), id: 1)
+            RegisterEventHotKey(
+                UInt32(keyCode),
+                config.carbonModifiers,
+                dropdownID,
+                GetApplicationEventTarget(),
+                0,
+                &hotkeyRef
+            )
+        }
+
+        // Register move-window hotkey (id=2), only if config provided
+        if let mwConfig = moveWindowConfig, let keyCode = mwConfig.keyCode {
+            let moveWindowID = EventHotKeyID(signature: OSType(0x4A4D_5045), id: 2)
+            RegisterEventHotKey(
+                UInt32(keyCode),
+                mwConfig.carbonModifiers,
+                moveWindowID,
+                GetApplicationEventTarget(),
+                0,
+                &moveWindowHotkeyRef
+            )
+        }
     }
 
     func unregister() {
         if let ref = hotkeyRef {
             UnregisterEventHotKey(ref)
             hotkeyRef = nil
+        }
+        if let ref = moveWindowHotkeyRef {
+            UnregisterEventHotKey(ref)
+            moveWindowHotkeyRef = nil
         }
         if let ref = handlerRef {
             RemoveEventHandler(ref)
@@ -722,7 +774,7 @@ class MenuBarController: NSObject {
 
         globalMenuBarController = self
         hotkeyManager = GlobalHotkeyManager()
-        hotkeyManager?.register(config: config.hotkey)
+        reRegisterHotkeys()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.overlayManager.updateOverlay(config: self!.config)
@@ -731,6 +783,57 @@ class MenuBarController: NSObject {
 
     func openMenu() {
         statusItem.button?.performClick(nil)
+    }
+
+    func openMoveWindowMenu() {
+        guard config.moveWindow?.enabled == true else { return }
+
+        let menu = NSMenu()
+        let displays = spaceDetector.getSpacesByDisplay()
+        let currentSpaceID = spaceDetector.getCurrentSpaceID()
+        let activeDisplayID = spaceDetector.getActiveDisplayID()
+
+        for display in displays {
+            guard display.displayID == activeDisplayID else { continue }
+
+            for space in display.spaces {
+                if space.spaceID == currentSpaceID { continue }
+
+                let key = String(space.spaceID)
+                let customName = config.spaces[key]
+                let displayName: String
+                if let name = customName, !name.isEmpty {
+                    if config.showSpaceNumber {
+                        displayName = "\(space.localPosition): \(name)"
+                    } else {
+                        displayName = name
+                    }
+                } else {
+                    displayName = "Desktop \(space.localPosition)"
+                }
+
+                let item = NSMenuItem(
+                    title: displayName,
+                    action: #selector(moveWindowFromPopup(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.tag = space.globalPosition
+                menu.addItem(item)
+            }
+        }
+
+        guard menu.items.count > 0 else { return }
+
+        let mouseLocation = NSEvent.mouseLocation
+        menu.popUp(positioning: nil, at: mouseLocation, in: nil)
+    }
+
+    @objc private func moveWindowFromPopup(_ sender: NSMenuItem) {
+        let targetGlobalPosition = sender.tag
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            WindowMover.moveToSpace(index: targetGlobalPosition)
+        }
     }
 
     private func migratePositionBasedConfig() {
@@ -771,6 +874,15 @@ class MenuBarController: NSObject {
         let headerFont = NSFont.boldSystemFont(ofSize: 13)
         headerItem.attributedTitle = NSAttributedString(string: "Jumpee", attributes: [.font: headerFont])
         menu.addItem(headerItem)
+
+        let aboutItem = NSMenuItem(
+            title: "About Jumpee...",
+            action: #selector(showAboutDialog),
+            keyEquivalent: ""
+        )
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+
         menu.addItem(NSMenuItem.separator())
 
         let spacesHeaderItem = NSMenuItem(title: "Desktops:", action: nil, keyEquivalent: "")
@@ -794,6 +906,31 @@ class MenuBarController: NSObject {
         overlayItem.target = self
         overlayItem.tag = 101
         menu.addItem(overlayItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        let hotkeysHeader = NSMenuItem(title: "Hotkeys:", action: nil, keyEquivalent: "")
+        hotkeysHeader.isEnabled = false
+        menu.addItem(hotkeysHeader)
+
+        let dropdownHotkeyItem = NSMenuItem(
+            title: "Dropdown Hotkey: \(config.hotkey.displayString)...",
+            action: #selector(editDropdownHotkey),
+            keyEquivalent: ""
+        )
+        dropdownHotkeyItem.target = self
+        dropdownHotkeyItem.tag = 300
+        menu.addItem(dropdownHotkeyItem)
+
+        let moveHotkeyItem = NSMenuItem(
+            title: "Move Window Hotkey: \(config.effectiveMoveWindowHotkey.displayString)...",
+            action: #selector(editMoveWindowHotkey),
+            keyEquivalent: ""
+        )
+        moveHotkeyItem.target = self
+        moveHotkeyItem.tag = 301
+        moveHotkeyItem.isHidden = !(config.moveWindow?.enabled == true)
+        menu.addItem(moveHotkeyItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -995,6 +1132,19 @@ class MenuBarController: NSObject {
         if let overlayItem = menu.item(withTag: 101) {
             overlayItem.title = config.overlay.enabled ? "Disable Overlay" : "Enable Overlay"
         }
+
+        // Update hotkey menu items
+        if let item = menu.item(withTag: 300) {
+            item.title = "Dropdown Hotkey: \(config.hotkey.displayString)..."
+        }
+        if let item = menu.item(withTag: 301) {
+            if config.moveWindow?.enabled == true {
+                item.title = "Move Window Hotkey: \(config.effectiveMoveWindowHotkey.displayString)..."
+                item.isHidden = false
+            } else {
+                item.isHidden = true
+            }
+        }
     }
 
     private func registerForSpaceChanges() {
@@ -1151,6 +1301,222 @@ class MenuBarController: NSObject {
         overlayManager.updateOverlay(config: config)
     }
 
+    @objc private func showAboutDialog() {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "About Jumpee"
+        alert.informativeText = """
+            Version: \(version)
+
+            Jumpee displays custom names for your macOS desktops \
+            in the menu bar, with a desktop overlay watermark and \
+            global hotkey navigation.
+
+            --- macOS Setup Requirements ---
+
+            1. Accessibility Permissions
+               System Settings > Privacy & Security > Accessibility
+               Add and enable Jumpee.app.
+
+            2. Desktop Switching Shortcuts
+               System Settings > Keyboard > Keyboard Shortcuts > \
+               Mission Control > Enable "Switch to Desktop 1" \
+               through "Switch to Desktop 9" (Ctrl+1 through Ctrl+9).
+
+            3. Window Moving (optional)
+               Same shortcuts as above must be enabled. Then set \
+               "moveWindow": {"enabled": true} in your config file.
+
+            --- Configuration ---
+
+            Config file: ~/.Jumpee/config.json
+            Open from menu: \u{2318},
+            Reload after editing: \u{2318}R
+
+            Hotkeys, overlay style, and space names are all \
+            configurable. See the config file for all options.
+            """
+        alert.addButton(withTitle: "OK")
+
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    @objc private func editDropdownHotkey() {
+        editHotkey(slot: .dropdown)
+    }
+
+    @objc private func editMoveWindowHotkey() {
+        editHotkey(slot: .moveWindow)
+    }
+
+    private func editHotkey(slot: HotkeySlot) {
+        let currentConfig: HotkeyConfig
+        let slotName: String
+        let defaultConfig: HotkeyConfig
+        let otherConfig: HotkeyConfig
+
+        switch slot {
+        case .dropdown:
+            currentConfig = config.hotkey
+            slotName = "Dropdown"
+            defaultConfig = HotkeyConfig(key: "j", modifiers: ["command"])
+            otherConfig = config.effectiveMoveWindowHotkey
+        case .moveWindow:
+            currentConfig = config.effectiveMoveWindowHotkey
+            slotName = "Move Window"
+            defaultConfig = HotkeyConfig(key: "m", modifiers: ["command"])
+            otherConfig = config.hotkey
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Edit \(slotName) Hotkey"
+        alert.informativeText = """
+            Current: \(currentConfig.displayString)
+            Enter a key (a-z, 0-9) and select modifiers.
+            """
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Reset to Default")
+        alert.addButton(withTitle: "Cancel")
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+
+        let keyLabel = NSTextField(labelWithString: "Key:")
+        keyLabel.frame = NSRect(x: 0, y: 70, width: 40, height: 24)
+        container.addSubview(keyLabel)
+
+        let keyField = NSTextField(frame: NSRect(x: 45, y: 70, width: 60, height: 24))
+        keyField.stringValue = currentConfig.key
+        keyField.placeholderString = "e.g., j"
+        container.addSubview(keyField)
+
+        let cmdCheck = NSButton(checkboxWithTitle: "Command", target: nil, action: nil)
+        cmdCheck.frame = NSRect(x: 0, y: 40, width: 120, height: 20)
+        cmdCheck.state = currentConfig.modifiers.contains(where: {
+            $0.lowercased() == "command" || $0.lowercased() == "cmd"
+        }) ? .on : .off
+        container.addSubview(cmdCheck)
+
+        let ctrlCheck = NSButton(checkboxWithTitle: "Control", target: nil, action: nil)
+        ctrlCheck.frame = NSRect(x: 120, y: 40, width: 100, height: 20)
+        ctrlCheck.state = currentConfig.modifiers.contains(where: {
+            $0.lowercased() == "control" || $0.lowercased() == "ctrl"
+        }) ? .on : .off
+        container.addSubview(ctrlCheck)
+
+        let optCheck = NSButton(checkboxWithTitle: "Option", target: nil, action: nil)
+        optCheck.frame = NSRect(x: 0, y: 15, width: 120, height: 20)
+        optCheck.state = currentConfig.modifiers.contains(where: {
+            $0.lowercased() == "option" || $0.lowercased() == "alt"
+        }) ? .on : .off
+        container.addSubview(optCheck)
+
+        let shiftCheck = NSButton(checkboxWithTitle: "Shift", target: nil, action: nil)
+        shiftCheck.frame = NSRect(x: 120, y: 15, width: 100, height: 20)
+        shiftCheck.state = currentConfig.modifiers.contains(where: {
+            $0.lowercased() == "shift"
+        }) ? .on : .off
+        container.addSubview(shiftCheck)
+
+        alert.accessoryView = container
+        alert.window.initialFirstResponder = keyField
+
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+
+        if response == .alertFirstButtonReturn {
+            // Save
+            let rawKey = keyField.stringValue
+                .lowercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let newKey = String(rawKey.prefix(1))
+
+            var newModifiers: [String] = []
+            if cmdCheck.state == .on { newModifiers.append("command") }
+            if ctrlCheck.state == .on { newModifiers.append("control") }
+            if optCheck.state == .on { newModifiers.append("option") }
+            if shiftCheck.state == .on { newModifiers.append("shift") }
+
+            guard !newModifiers.isEmpty else {
+                showValidationError(
+                    title: "Invalid Hotkey",
+                    message: "At least one modifier (Command, Control, Option, Shift) must be selected."
+                )
+                return
+            }
+
+            let newConfig = HotkeyConfig(key: newKey, modifiers: newModifiers)
+            guard newConfig.keyCode != nil else {
+                showValidationError(
+                    title: "Unsupported Key",
+                    message: "The key '\(newKey)' is not supported. Use a-z, 0-9, space, return, tab, or escape."
+                )
+                return
+            }
+
+            // Check for conflict with the other Jumpee hotkey
+            let newModsNormalized = Set(newModifiers.map { $0.lowercased() })
+            let otherModsNormalized = Set(otherConfig.modifiers.map { $0.lowercased() })
+            if newConfig.key.lowercased() == otherConfig.key.lowercased()
+                && newModsNormalized == otherModsNormalized {
+                let otherIsActive: Bool
+                switch slot {
+                case .dropdown:
+                    otherIsActive = config.moveWindow?.enabled == true
+                case .moveWindow:
+                    otherIsActive = true
+                }
+                if otherIsActive {
+                    showValidationError(
+                        title: "Hotkey Conflict",
+                        message: "This combination is already used by the other Jumpee hotkey (\(otherConfig.displayString))."
+                    )
+                    return
+                }
+            }
+
+            switch slot {
+            case .dropdown:
+                config.hotkey = newConfig
+            case .moveWindow:
+                config.moveWindowHotkey = newConfig
+            }
+            config.save()
+            reRegisterHotkeys()
+
+        } else if response == .alertSecondButtonReturn {
+            // Reset to Default
+            switch slot {
+            case .dropdown:
+                config.hotkey = defaultConfig
+            case .moveWindow:
+                config.moveWindowHotkey = defaultConfig
+            }
+            config.save()
+            reRegisterHotkeys()
+        }
+    }
+
+    private func showValidationError(title: String, message: String) {
+        let errAlert = NSAlert()
+        errAlert.messageText = title
+        errAlert.informativeText = message
+        errAlert.alertStyle = .warning
+        errAlert.addButton(withTitle: "OK")
+        errAlert.runModal()
+    }
+
+    private func reRegisterHotkeys() {
+        hotkeyManager?.register(
+            config: config.hotkey,
+            moveWindowConfig: config.moveWindow?.enabled == true
+                ? config.effectiveMoveWindowHotkey
+                : nil
+        )
+    }
+
     @objc private func openConfig(_ sender: NSMenuItem) {
         if !FileManager.default.fileExists(atPath: JumpeeConfig.configFile.path) {
             config.save()
@@ -1162,7 +1528,7 @@ class MenuBarController: NSObject {
         config = JumpeeConfig.load()
         updateTitle()
         overlayManager.updateOverlay(config: config)
-        hotkeyManager?.register(config: config.hotkey)
+        reRegisterHotkeys()
     }
 
     @objc private func quit(_ sender: NSMenuItem) {

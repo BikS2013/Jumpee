@@ -20,6 +20,14 @@
 
 9. **Jumpee - Move Window: macOS 15+ forces follow-window behavior**: On macOS 15 (Sequoia) and later, all approaches to moving a window between spaces force the user to follow the window. "Move without following" is impossible. This is a platform limitation, not a Jumpee limitation. Documented in plan-004.
 
+10. **Jumpee - Move Window Hotkey Cmd+M conflicts with system Minimize**: The default move-window hotkey (Cmd+M) conflicts with the system-wide "Minimize" shortcut used by most macOS apps. When Jumpee registers this hotkey, Cmd+M triggers Jumpee's popup instead of minimizing. Users should change to an alternative (e.g., Cmd+Shift+M) via the Hotkey Configuration UI or config file. Documented in technical-design-v1.3.0-hotkey-about.md.
+
+11. **Jumpee - Config default exception for moveWindowHotkey**: The `moveWindowHotkey` config property defaults to Cmd+M when absent and `moveWindow.enabled` is true. This is a documented exception to the project's "no default fallback for config settings" rule. The exception is centralized in the `effectiveMoveWindowHotkey` computed property. Must be recorded in the project's memory file before v1.3.0 implementation begins.
+
+12. **Jumpee - Hotkey editor cannot enter special keys**: The hotkey editor dialog uses a single-character text field, which means special keys like "space", "return", "tab", and "escape" cannot be entered through the UI (only a-z and 0-9 work). These keys can still be configured via the JSON config file. A full key recorder widget is out of scope per the design spec.
+
+13. **Jumpee - Design doc menu layout inconsistency**: The technical design doc (v1.3.0, section 7.1) shows "About Jumpee..." appearing before the "Jumpee" header, but section 6.1 of the same document and the refined request both specify it should appear after the header. The implementation correctly follows the detailed instruction (after the header). The section 7.1 diagram should be updated to match.
+
 ## Completed
 
 1. **Jumpee - Global hotkey**: Implemented configurable global hotkey (default Cmd+J) using Carbon RegisterEventHotKey API.
@@ -35,3 +43,5 @@
 6. **Jumpee - Space ID tracking**: Names now follow desktops when reordered in Mission Control. Config keys use ManagedSpaceID instead of position numbers. Existing configs auto-migrated on first run.
 
 7. **Jumpee - Multi-display workspace support**: Added per-display workspace lists, per-display numbering, display headers in menu, overlay on correct screen, and display connect/disconnect handling. No config format changes needed.
+
+8. **Jumpee - v1.3.0 compiler warnings fixed**: Changed `var dropdownID` and `var moveWindowID` to `let` in `GlobalHotkeyManager.register()` since `RegisterEventHotKey` takes `EventHotKeyID` by value, not by mutable reference. Fixed during code review.
