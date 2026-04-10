@@ -192,6 +192,82 @@ Desktop switching uses `osascript` to send keystrokes. Your terminal app must ha
 1. Open **System Settings** > **Privacy & Security** > **Accessibility**
 2. Add and enable your terminal app (Terminal.app, iTerm2, etc.)
 
+### `pinWindow` (object, optional)
+
+Controls the pin-window-on-top feature. When enabled, you can pin any window to float above all other windows.
+
+| Property | Type | Description | Default |
+|----------|------|-------------|---------|
+| `enabled` | boolean | Enable/disable the pin window feature | Feature disabled when absent |
+
+- **How to enable**: Add `"pinWindow": { "enabled": true }` to your config file, then reload (Cmd+R).
+- **How it works**: Jumpee captures the target window's image and displays it in its own floating window. The overlay is click-through — clicks pass to the real window underneath.
+- **Required permission**: Screen Recording (System Settings > Privacy & Security > Screen Recording). Jumpee prompts you if this is missing.
+- **Note**: Pin state is in-memory only and does not persist across Jumpee restarts. All windows are unpinned when Jumpee quits.
+
+### `pinWindowHotkey` (object, optional)
+
+The global keyboard shortcut to toggle pin/unpin on the currently focused window. Only active when `pinWindow.enabled` is `true`.
+
+| Property | Type | Description | Default |
+|----------|------|-------------|---------|
+| `key` | string | The key to press | `"p"` |
+| `modifiers` | string[] | Modifier keys to hold | `["control", "command"]` |
+
+Same supported key and modifier values as the `hotkey` property above.
+
+- **Default**: Ctrl+Cmd+P (when omitted from config and `pinWindow.enabled` is `true`). This is a documented exception to the no-default-fallback rule.
+- **How to change**: Click "Pin Window Hotkey: ..." in the Hotkeys section of the menu, or edit the config file and reload (Cmd+R).
+- **Behavior**: Press once to pin the focused window on top. Press again (while the same window is focused) to unpin it. Use "Unpin All Windows" in the menu to release all pinned windows at once.
+
+### Complete Configuration Example (with all features)
+
+```json
+{
+  "hotkey": {
+    "key": "j",
+    "modifiers": ["command"]
+  },
+  "moveWindow": {
+    "enabled": true
+  },
+  "moveWindowHotkey": {
+    "key": "m",
+    "modifiers": ["command", "shift"]
+  },
+  "pinWindow": {
+    "enabled": true
+  },
+  "pinWindowHotkey": {
+    "key": "p",
+    "modifiers": ["control", "command"]
+  },
+  "overlay": {
+    "enabled": true,
+    "fontName": "Helvetica Neue",
+    "fontSize": 72,
+    "fontWeight": "bold",
+    "margin": 40,
+    "opacity": 0.15,
+    "position": "top-center",
+    "textColor": "#FF0000"
+  },
+  "showSpaceNumber": true,
+  "spaces": {
+    "42": "Mail & Calendar",
+    "15": "Development",
+    "8": "Terminal"
+  }
+}
+```
+
+## Permissions Summary
+
+| Permission | Required for | How to grant |
+|------------|-------------|--------------|
+| Accessibility | Desktop switching, window moving, pin window | System Settings > Privacy & Security > Accessibility |
+| Screen Recording | Pin window on top | System Settings > Privacy & Security > Screen Recording |
+
 ## Applying Configuration Changes
 
 | Change | How to apply |
@@ -201,5 +277,7 @@ Desktop switching uses `osascript` to send keystrokes. Your terminal app must ha
 | Toggle overlay | Use menu toggle — saves automatically |
 | Change dropdown hotkey | Click "Dropdown Hotkey: ..." in menu, or edit config + Cmd+R |
 | Change move-window hotkey | Click "Move Window Hotkey: ..." in menu, or edit config + Cmd+R |
+| Change pin-window hotkey | Click "Pin Window Hotkey: ..." in menu, or edit config + Cmd+R |
+| Enable pin window | Add `"pinWindow": {"enabled": true}` to config, then Cmd+R |
 | Change overlay style | Edit config file, then Cmd+R to reload |
 | Change font weight | Edit config file, then Cmd+R to reload |

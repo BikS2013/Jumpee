@@ -24,9 +24,13 @@
 
 11. **Jumpee - Config default exception for moveWindowHotkey**: The `moveWindowHotkey` config property defaults to Cmd+M when absent and `moveWindow.enabled` is true. This is a documented exception to the project's "no default fallback for config settings" rule. The exception is centralized in the `effectiveMoveWindowHotkey` computed property. Must be recorded in the project's memory file before v1.3.0 implementation begins.
 
-12. **Jumpee - Hotkey editor cannot enter special keys**: The hotkey editor dialog uses a single-character text field, which means special keys like "space", "return", "tab", and "escape" cannot be entered through the UI (only a-z and 0-9 work). These keys can still be configured via the JSON config file. A full key recorder widget is out of scope per the design spec.
+12. **Jumpee - Config default exception for pinWindowHotkey**: The `pinWindowHotkey` config property defaults to Ctrl+Cmd+P when absent and `pinWindow.enabled` is true. This is a documented exception to the project's "no default fallback for config settings" rule, identical to the `moveWindowHotkey` exception (item 11). The exception is centralized in the `effectivePinWindowHotkey` computed property.
 
-13. **Jumpee - Design doc menu layout inconsistency**: The technical design doc (v1.3.0, section 7.1) shows "About Jumpee..." appearing before the "Jumpee" header, but section 6.1 of the same document and the refined request both specify it should appear after the header. The implementation correctly follows the detailed instruction (after the header). The section 7.1 diagram should be updated to match.
+13. **Jumpee - Pin Window: CGSSetWindowLevel cross-app reliability unverified**: The `CGSSetWindowLevel` private API is used to elevate other apps' window levels. While the API compiles and the build succeeds, actual cross-app pinning behavior has not been verified at runtime. If macOS resets window levels on focus change, a periodic re-assertion timer may be needed (see project-design.md, Section 16 Risks).
+
+14. **Jumpee - Hotkey editor cannot enter special keys**: The hotkey editor dialog uses a single-character text field, which means special keys like "space", "return", "tab", and "escape" cannot be entered through the UI (only a-z and 0-9 work). These keys can still be configured via the JSON config file. A full key recorder widget is out of scope per the design spec.
+
+15. **Jumpee - Design doc menu layout inconsistency**: The technical design doc (v1.3.0, section 7.1) shows "About Jumpee..." appearing before the "Jumpee" header, but section 6.1 of the same document and the refined request both specify it should appear after the header. The implementation correctly follows the detailed instruction (after the header). The section 7.1 diagram should be updated to match.
 
 ## Completed
 

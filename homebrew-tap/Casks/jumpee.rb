@@ -1,10 +1,10 @@
 cask "jumpee" do
-  version "1.3.0"
-  sha256 "cec5de20918f130f881ceeb8a413fdc89ae25069ac2d85c48940a6492498814d"
+  version "1.4.0"
+  sha256 "f0522d45b2f10d19c1663f639e980fe9575036bf96deba325c2ab9f321af1b3e"
 
   url "https://github.com/BikS2013/Jumpee/releases/download/v#{version}/Jumpee-#{version}.zip"
   name "Jumpee"
-  desc "macOS menu bar app for naming and jumping between Mission Control desktops"
+  desc "macOS menu bar app for naming, jumping between desktops, and pinning windows on top"
   homepage "https://github.com/BikS2013/Jumpee"
 
   depends_on macos: ">= :ventura"
@@ -28,11 +28,15 @@ cask "jumpee" do
     Mission Control keyboard shortcuts (Ctrl+1 through Ctrl+9) must be enabled:
       System Settings > Keyboard > Keyboard Shortcuts > Mission Control
 
+    Pin Window on Top requires Screen Recording permission:
+      System Settings > Privacy & Security > Screen Recording > enable Jumpee
+
     To start Jumpee at login:
       System Settings > General > Login Items > add Jumpee
 
     Global hotkeys (configurable from the Hotkeys section in the menu):
-      Cmd+J — open dropdown menu
-      Cmd+M — move focused window to another desktop (requires moveWindow.enabled)
+      Cmd+J       — open dropdown menu
+      Cmd+M       — move focused window to another desktop (requires moveWindow.enabled)
+      Ctrl+Cmd+P  — pin/unpin focused window on top (requires pinWindow.enabled)
   EOS
 end

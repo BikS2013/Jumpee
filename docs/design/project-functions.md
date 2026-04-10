@@ -1,6 +1,6 @@
 # Jumpee - Functional Requirements
 
-**Last updated:** 2026-04-10 (v1.3.0 features added)
+**Last updated:** 2026-04-10 (v1.4.0 pin-window-on-top proposed)
 
 ---
 
@@ -150,3 +150,56 @@ Ad-hoc code signing (`codesign --force --sign -`) ensures Accessibility permissi
 
 ### NFR-6: Low Latency
 Space navigation and window moving should complete within 500ms perceived delay. The 300ms menu-close delay before keystroke synthesis is the primary latency contributor.
+
+---
+
+## 8. Pin Window on Top (Proposed - plan-006)
+
+### FR-34: Pin Focused Window on Top
+The user can pin the currently focused (frontmost) application window so it remains above all other non-pinned windows. Pinning is achieved via the private `CGSSetWindowLevel` API, setting the target window's level to `kCGFloatingWindowLevel` (3). The implementation uses the same `CGSMainConnectionID()` connection and `_AXUIElementGetWindow` pattern already established in Jumpee.
+
+**Prerequisite:** `pinWindow.enabled` must be `true` in the config. Jumpee must have Accessibility permissions.
+
+### FR-35: Unpin a Pinned Window
+The user can unpin a previously pinned window to restore its normal z-order behavior. Unpinning sets the window level back to `kCGNormalWindowLevel` (0) via `CGSSetWindowLevel`.
+
+### FR-36: Multiple Pinned Windows
+Multiple windows from different applications can be pinned simultaneously. All pinned windows float above non-pinned windows. The relative z-order among pinned windows follows normal stacking rules (last focused is on top among pinned windows).
+
+### FR-37: Pin State Tracking
+Jumpee maintains an in-memory `Set<CGWindowID>` of currently pinned windows. This set is not persisted across app restarts -- all pins are released when Jumpee quits. The `WindowPinner` static class (following the same pattern as `WindowMover`) manages this state.
+
+### FR-38: Pin Toggle Semantics
+The pin operation is a toggle: if the focused window is not pinned, the action pins it; if the focused window is already pinned, the action unpins it. This applies to both the global hotkey and the menu item.
+
+### FR-39: Graceful Handling of Closed Pinned Windows
+If a pinned window is closed by the user or its owning application, Jumpee silently removes it from the pinned set during the next cleanup pass. Cleanup is triggered before menu rebuild and on space change. No error dialog is shown.
+
+### FR-40: Pin Window Configuration
+A `pinWindow` configuration section in `~/.Jumpee/config.json` controls whether the feature is available:
+```json
+{
+    "pinWindow": {
+        "enabled": true
+    }
+}
+```
+When absent or `enabled: false`, the menu items and hotkey for pin-on-top are hidden/not registered. Existing configs without this key work without modification.
+
+### FR-41: Pin Window Global Hotkey
+A configurable global hotkey (default: Ctrl+Cmd+P) toggles pin state on the focused window. The hotkey is stored in `pinWindowHotkey` in the config, using the same `HotkeyConfig` schema as the existing `hotkey` and `moveWindowHotkey` fields. Registered as Carbon hotkey id=3 in the shared event handler.
+
+**Hotkey lifecycle:** Registered only when `pinWindow.enabled` is `true`. Re-registered on config reload (Cmd+R). Unregistered when the feature is disabled.
+
+### FR-42: Pin/Unpin Menu Item
+A menu item in the Jumpee dropdown toggles the pin state of the focused window:
+- When the focused window is **not pinned**: displays "Pin Window on Top" with Ctrl+Cmd+P keyboard equivalent
+- When the focused window **is pinned**: displays "Unpin Window" with the same keyboard equivalent
+- Placed near the "Move Window To..." submenu (both are window-management operations)
+- Only visible when `pinWindow.enabled` is `true`
+
+### FR-43: Pin Window Hotkey Editor
+A "Pin Window Hotkey: Ctrl+Cmd+P..." entry appears in the Hotkeys section of the menu (alongside the dropdown and move-window hotkey entries). Clicking it opens the same hotkey editor dialog used for the other hotkeys. Includes 3-way conflict checking against the dropdown and move-window hotkeys. Only visible when `pinWindow.enabled` is `true`.
+
+### FR-44: Pin Cleanup on Quit
+When Jumpee quits (Cmd+Q), all pinned windows are restored to normal z-order (`kCGNormalWindowLevel`) before the application terminates. This ensures no windows are left permanently floating after Jumpee exits.

@@ -804,3 +804,778 @@ Quit Jumpee                         Cmd+Q
 | Popup steals focus, WindowMover fails | Medium | 300ms delay (proven pattern); can capture AXUIElement before popup if needed |
 | Multi-monitor popup positioning | Low | `NSEvent.mouseLocation` + `in: nil` uses global screen coordinates |
 | User enters unsupported key in editor | Low | Validated against `HotkeyConfig.keyCode` map; error shown |
+
+## Pin Window on Top Feature (v1.4.0)
+
+This section describes the detailed technical design for the "pin window on top" (always-on-top) feature. The requirements are in `docs/reference/refined-request-pin-window-on-top.md`. The implementation plan is in `docs/design/plan-006-pin-window-on-top.md`. The technical investigation is in `docs/reference/investigation-pin-window-on-top.md`.
+
+### Feature Summary
+
+Allow users to pin any focused window "always on top" so it floats above all other non-pinned windows. The feature uses the private `CGSSetWindowLevel` API (Option A from the implementation plan) to directly change the target window's level in the WindowServer. If Option A fails during the Phase 0 feasibility spike, the feature falls back to Option B (ScreenCaptureKit overlay), which would require a separate detailed design.
+
+### 1. New Private API Declarations
+
+**Location:** `Sources/main.swift`, lines 27-29 (after the existing `_AXUIElementGetWindow` declaration, before the `// MARK: - Configuration` comment at line 32).
+
+**Insert after line 29** (after `func _AXUIElementGetWindow(...)`):
+
+```swift
+// Private CGS APIs for window level manipulation (pin-on-top feature)
+@_silgen_name("CGSSetWindowLevel")
+func CGSSetWindowLevel(_ connection: Int32, _ windowID: CGWindowID, _ level: Int32) -> CGError
+
+@_silgen_name("CGSGetWindowLevel")
+func CGSGetWindowLevel(_ connection: Int32, _ windowID: CGWindowID, _ level: UnsafeMutablePointer<Int32>) -> CGError
+```
+
+**Design notes:**
+- The function signatures match the CGSInternal reverse-engineered headers (`NUIKit/CGSInternal/CGSWindow.h`).
+- `CGSSetWindowLevel` takes a CGS connection ID (obtained via `CGSMainConnectionID()`), a window ID (`CGWindowID` aka `UInt32`), and a window level (`Int32`). Returns `CGError` (`.success` = 0 on success).
+- `CGSGetWindowLevel` reads the current level into an `UnsafeMutablePointer<Int32>`.
+- These follow the exact same `@_silgen_name` pattern as the six existing private API declarations at lines 6-29.
+- The `CGS` prefix functions may have `SLS` (SkyLight) equivalents on macOS 13+. Both appear available as of macOS 15. We use `CGS` for consistency with the existing codebase.
+
+### 2. PinWindowConfig Struct
+
+**Location:** `Sources/main.swift`, after `MoveWindowConfig` (line 111), before `JumpeeConfig` (line 113).
+
+**Insert after line 111:**
+
+```swift
+struct PinWindowConfig: Codable {
+    /// Whether the pin-window feature is enabled.
+    /// When false, the "Pin Window on Top" menu item and hotkey are hidden/not registered.
+    var enabled: Bool
+}
+```
+
+**Design notes:**
+- Follows the exact pattern of `MoveWindowConfig` (line 107-111): a simple Codable struct with a single `enabled: Bool` field.
+- Config key in `~/.Jumpee/config.json`: `"pinWindow": { "enabled": true }`.
+- When absent from the config file, the feature is disabled (backward compatible with existing configs).
+
+### 3. PinWindowHotkeyConfig (uses existing HotkeyConfig)
+
+No new struct is needed. The pin-window hotkey uses the existing `HotkeyConfig` struct (lines 56-105), which already supports `key`, `modifiers`, `keyCode`, `carbonModifiers`, and `displayString`.
+
+**Config key in `~/.Jumpee/config.json`:**
+
+```json
+{
+    "pinWindowHotkey": {
+        "key": "p",
+        "modifiers": ["command", "control"]
+    }
+}
+```
+
+**Default: Ctrl+Cmd+P** -- "P" is mnemonic for "Pin". The Ctrl+Cmd combination avoids conflict with Cmd+P (Print) in virtually all macOS apps. This is the same kind of documented exception to the "no default fallback" rule as `effectiveMoveWindowHotkey`.
+
+### 4. JumpeeConfig Extensions
+
+**Location:** `Sources/main.swift`, inside `struct JumpeeConfig` (lines 113-152).
+
+#### 4.1 New Fields
+
+**Insert after line 119** (after `var moveWindowHotkey: HotkeyConfig?`):
+
+```swift
+var pinWindow: PinWindowConfig?
+var pinWindowHotkey: HotkeyConfig?
+```
+
+#### 4.2 New Computed Property
+
+**Insert after line 125** (after `effectiveMoveWindowHotkey` computed property closing brace):
+
+```swift
+/// Resolved pin-window hotkey: explicit config or default Ctrl+Cmd+P.
+/// Documented exception to the no-default-fallback rule (see Issues - Pending Items.md).
+var effectivePinWindowHotkey: HotkeyConfig {
+    return pinWindowHotkey ?? HotkeyConfig(key: "p", modifiers: ["command", "control"])
+}
+```
+
+**Design notes:**
+- `pinWindow` and `pinWindowHotkey` are both optional (`?`) for backward compatibility. Existing configs without these keys will decode without error.
+- The `effectivePinWindowHotkey` computed property follows the exact pattern of `effectiveMoveWindowHotkey` at line 123.
+- The default hotkey exception must be recorded in `Issues - Pending Items.md` before implementation.
+
+### 5. WindowPinner Class
+
+**Location:** `Sources/main.swift`, after the `WindowMover` class (line 647), before `// MARK: - Hotkey Slot` (line 649).
+
+**Insert after line 647:**
+
+```swift
+// MARK: - Window Pinner
+
+class WindowPinner {
+    /// Tracks pinned windows: maps CGWindowID -> original window level before pinning.
+    /// This allows restoring the exact original level on unpin, not just assuming level 0.
+    private static var pinnedWindows: [CGWindowID: Int32] = [:]
+
+    /// Toggle pin state of the currently focused window.
+    /// If the focused window is not pinned, pins it (sets level to kCGFloatingWindowLevel).
+    /// If the focused window is already pinned, unpins it (restores original level).
+    /// Returns: true if window is now pinned, false if unpinned, nil if operation failed.
+    @discardableResult
+    static func togglePin() -> Bool? {
+        cleanupClosedWindows()
+
+        guard let windowID = getFocusedWindowID() else {
+            NSLog("[Jumpee] WindowPinner: Failed to get focused window ID")
+            return nil
+        }
+
+        if let originalLevel = pinnedWindows[windowID] {
+            // Currently pinned -> unpin (restore original level)
+            let err = CGSSetWindowLevel(CGSMainConnectionID(), windowID, originalLevel)
+            if err == .success {
+                pinnedWindows.removeValue(forKey: windowID)
+                NSLog("[Jumpee] WindowPinner: Unpinned window %u (restored level %d)", windowID, originalLevel)
+                return false
+            } else {
+                NSLog("[Jumpee] WindowPinner: CGSSetWindowLevel failed on unpin (error %d)", err.rawValue)
+                // Remove from tracking anyway since we can't manage it
+                pinnedWindows.removeValue(forKey: windowID)
+                return nil
+            }
+        } else {
+            // Not pinned -> pin (elevate to floating level)
+            // First, read current level so we can restore it later
+            var currentLevel: Int32 = 0
+            let getErr = CGSGetWindowLevel(CGSMainConnectionID(), windowID, &currentLevel)
+            if getErr != .success {
+                NSLog("[Jumpee] WindowPinner: CGSGetWindowLevel failed (error %d), assuming level 0", getErr.rawValue)
+                currentLevel = 0
+            }
+
+            let floatingLevel = Int32(CGWindowLevelForKey(.floatingWindow))  // value: 3
+            let setErr = CGSSetWindowLevel(CGSMainConnectionID(), windowID, floatingLevel)
+            if setErr == .success {
+                pinnedWindows[windowID] = currentLevel
+                NSLog("[Jumpee] WindowPinner: Pinned window %u (original level %d, new level %d)",
+                      windowID, currentLevel, floatingLevel)
+                return true
+            } else {
+                NSLog("[Jumpee] WindowPinner: CGSSetWindowLevel failed on pin (error %d)", setErr.rawValue)
+                return nil
+            }
+        }
+    }
+
+    /// Check whether a given window is currently pinned.
+    static func isPinned(_ windowID: CGWindowID) -> Bool {
+        return pinnedWindows[windowID] != nil
+    }
+
+    /// Unpin all currently pinned windows, restoring their original levels.
+    /// Called on Jumpee quit to leave windows in a clean state.
+    static func unpinAll() {
+        let conn = CGSMainConnectionID()
+        for (windowID, originalLevel) in pinnedWindows {
+            let err = CGSSetWindowLevel(conn, windowID, originalLevel)
+            if err != .success {
+                NSLog("[Jumpee] WindowPinner: Failed to restore level for window %u (error %d)",
+                      windowID, err.rawValue)
+            }
+        }
+        pinnedWindows.removeAll()
+        NSLog("[Jumpee] WindowPinner: Unpinned all windows")
+    }
+
+    /// Remove entries for windows that have been closed by the user or their owning app.
+    /// Uses CGWindowListCopyWindowInfo to get active window IDs and prunes stale entries.
+    static func cleanupClosedWindows() {
+        guard !pinnedWindows.isEmpty else { return }
+
+        guard let windowList = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] else {
+            return
+        }
+
+        let activeIDs = Set(windowList.compactMap { $0[kCGWindowNumber as String] as? CGWindowID })
+        let staleIDs = pinnedWindows.keys.filter { !activeIDs.contains($0) }
+
+        for staleID in staleIDs {
+            pinnedWindows.removeValue(forKey: staleID)
+            NSLog("[Jumpee] WindowPinner: Removed closed window %u from pinned set", staleID)
+        }
+    }
+
+    /// Get the CGWindowID of the currently focused window.
+    /// Reuses the AXUIElement pattern from WindowMover (lines 551-564 of main.swift).
+    /// Returns nil if any step fails (no focused app, no focused window, or AX error).
+    static func getFocusedWindowID() -> CGWindowID? {
+        let systemWide = AXUIElementCreateSystemWide()
+
+        var focusedApp: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(systemWide,
+              kAXFocusedApplicationAttribute as CFString, &focusedApp) == .success else {
+            return nil
+        }
+
+        var focusedWindow: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(focusedApp as! AXUIElement,
+              kAXFocusedWindowAttribute as CFString, &focusedWindow) == .success else {
+            return nil
+        }
+
+        var windowID: CGWindowID = 0
+        guard _AXUIElementGetWindow(focusedWindow as! AXUIElement, &windowID) == .success else {
+            return nil
+        }
+
+        return windowID
+    }
+
+    /// Number of currently pinned windows.
+    static var pinnedCount: Int {
+        return pinnedWindows.count
+    }
+}
+```
+
+**Design notes:**
+- **Dictionary instead of Set:** `pinnedWindows` is `[CGWindowID: Int32]` (mapping window ID to its original level before pinning), not `Set<CGWindowID>`. This ensures we can restore the exact original level on unpin, which is important for windows that may already have non-standard levels (e.g., utility panels).
+- **`getFocusedWindowID()`** extracts the common AXUIElement pattern from `WindowMover.moveToSpace()` (lines 551-564) into a reusable static method. This is the same pattern: `AXUIElementCreateSystemWide()` -> `kAXFocusedApplicationAttribute` -> `kAXFocusedWindowAttribute` -> `_AXUIElementGetWindow`.
+- **`cleanupClosedWindows()`** uses `CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID)` to enumerate all system windows and prunes any pinned entries not found. Called at the start of `togglePin()` and before menu rebuild.
+- **Pin level:** `Int32(CGWindowLevelForKey(.floatingWindow))` which evaluates to `3` (kCGFloatingWindowLevel). This places pinned windows above normal windows but below system UI (menu bar, Dock, etc.).
+- **`unpinAll()`** restores all pinned windows to their original levels. Called from `MenuBarController.quit()`.
+- **Logging:** All operations log via `NSLog` for debugging, matching the existing pattern in `WindowMover`.
+- **`@discardableResult` on `togglePin()`:** Returns `Bool?` -- `true` if now pinned, `false` if unpinned, `nil` if failed. Callers can use this for visual feedback or ignore it.
+
+### 6. HotkeySlot Extension
+
+**Location:** `Sources/main.swift`, line 651-654 (`private enum HotkeySlot`).
+
+**Change from:**
+
+```swift
+private enum HotkeySlot {
+    case dropdown
+    case moveWindow
+}
+```
+
+**Change to:**
+
+```swift
+private enum HotkeySlot {
+    case dropdown
+    case moveWindow
+    case pinWindow
+}
+```
+
+### 7. hotkeyEventHandler Extension
+
+**Location:** `Sources/main.swift`, inside `hotkeyEventHandler` function, lines 673-681 (the `switch hotKeyID.id` block).
+
+**Change from:**
+
+```swift
+DispatchQueue.main.async {
+    switch hotKeyID.id {
+    case 1:
+        globalMenuBarController?.openMenu()
+    case 2:
+        globalMenuBarController?.openMoveWindowMenu()
+    default:
+        break
+    }
+}
+```
+
+**Change to:**
+
+```swift
+DispatchQueue.main.async {
+    switch hotKeyID.id {
+    case 1:
+        globalMenuBarController?.openMenu()
+    case 2:
+        globalMenuBarController?.openMoveWindowMenu()
+    case 3:
+        globalMenuBarController?.togglePinWindow()
+    default:
+        break
+    }
+}
+```
+
+### 8. GlobalHotkeyManager Extensions
+
+**Location:** `Sources/main.swift`, `class GlobalHotkeyManager` (lines 686-752).
+
+#### 8.1 New Field
+
+**Insert after line 688** (after `private var moveWindowHotkeyRef: EventHotKeyRef?`):
+
+```swift
+private var pinWindowHotkeyRef: EventHotKeyRef?
+```
+
+#### 8.2 Extended register() Signature
+
+**Change line 691 from:**
+
+```swift
+func register(config: HotkeyConfig, moveWindowConfig: HotkeyConfig?)
+```
+
+**Change to:**
+
+```swift
+func register(config: HotkeyConfig, moveWindowConfig: HotkeyConfig?, pinWindowConfig: HotkeyConfig?)
+```
+
+#### 8.3 New Registration Block
+
+**Insert after line 731** (after the move-window hotkey registration closing brace `}`), before the `register()` method closing brace:
+
+```swift
+// Register pin-window hotkey (id=3), only if config provided
+if let pwConfig = pinWindowConfig, let keyCode = pwConfig.keyCode {
+    let pinWindowID = EventHotKeyID(signature: OSType(0x4A4D_5045), id: 3)
+    RegisterEventHotKey(
+        UInt32(keyCode),
+        pwConfig.carbonModifiers,
+        pinWindowID,
+        GetApplicationEventTarget(),
+        0,
+        &pinWindowHotkeyRef
+    )
+}
+```
+
+**Design notes:**
+- Hotkey ID `3` continues the sequence: dropdown=1, move-window=2, pin-window=3.
+- Signature `0x4A4D5045` ("JMPE") is shared across all three hotkeys, matching the existing convention.
+- Registration is conditional: only when `pinWindowConfig` is non-nil (feature enabled and config provided).
+
+#### 8.4 Extended unregister() Method
+
+**Insert after line 741** (after the `moveWindowHotkeyRef` unregistration block), before the `handlerRef` cleanup:
+
+```swift
+if let ref = pinWindowHotkeyRef {
+    UnregisterEventHotKey(ref)
+    pinWindowHotkeyRef = nil
+}
+```
+
+### 9. MenuBarController Changes
+
+#### 9.1 New `togglePinWindow()` Method
+
+**Location:** `Sources/main.swift`, inside `class MenuBarController`, after `openMoveWindowMenu()` (line 830).
+
+**Insert after line 830:**
+
+```swift
+func togglePinWindow() {
+    guard config.pinWindow?.enabled == true else { return }
+    let result = WindowPinner.togglePin()
+    if result != nil {
+        NSSound.beep()  // Brief auditory feedback
+    }
+}
+```
+
+**Design notes:**
+- Public method (no `private`), called by `hotkeyEventHandler` via `globalMenuBarController?.togglePinWindow()`.
+- Guard checks feature enablement for safety.
+- `NSSound.beep()` provides minimal auditory feedback on success. This can be replaced with a visual indicator in a future enhancement.
+
+#### 9.2 New Menu Items in setupMenu()
+
+**Location:** `Sources/main.swift`, inside `setupMenu()`, after the move-window hotkey item (line 933) and before the separator at line 935.
+
+**Insert after line 933** (after `menu.addItem(moveHotkeyItem)`):
+
+```swift
+let pinHotkeyItem = NSMenuItem(
+    title: "Pin Window Hotkey: \(config.effectivePinWindowHotkey.displayString)...",
+    action: #selector(editPinWindowHotkey),
+    keyEquivalent: ""
+)
+pinHotkeyItem.target = self
+pinHotkeyItem.tag = 303
+pinHotkeyItem.isHidden = !(config.pinWindow?.enabled == true)
+menu.addItem(pinHotkeyItem)
+```
+
+**Design notes:**
+- Tag 303 follows the convention: 300 (dropdown hotkey), 301 (move-window hotkey), 303 (pin-window hotkey).
+- Tag 302 is reserved for the dynamic "Pin Window on Top" / "Unpin Window" menu item added in `rebuildSpaceItems()`.
+- Hidden when `pinWindow.enabled` is false or absent.
+
+#### 9.3 Dynamic Pin/Unpin Item in rebuildSpaceItems()
+
+**Location:** `Sources/main.swift`, inside `rebuildSpaceItems()`, after the "Move Window To..." submenu block (after line 1109), and before the "Set Up Window Moving..." block (line 1111).
+
+**Insert after line 1109** (after `spaceMenuItems.append(moveSubmenuItem)`), inside a new conditional block:
+
+```swift
+// --- Pin Window on Top item (after Move Window submenu) ---
+if config.pinWindow?.enabled == true {
+    insertIndex += 1
+
+    // Determine pin state of the previously focused window
+    // Note: When the menu opens, focus may shift to Jumpee. We capture
+    // the focused window ID at this point; the AX focus may have already
+    // changed. If so, the item defaults to "Pin Window on Top".
+    let focusedWindowID = WindowPinner.getFocusedWindowID()
+    let isCurrentlyPinned = focusedWindowID != nil && WindowPinner.isPinned(focusedWindowID!)
+
+    let pinTitle = isCurrentlyPinned ? "Unpin Window" : "Pin Window on Top"
+    let pinItem = NSMenuItem(
+        title: pinTitle,
+        action: #selector(pinWindowAction),
+        keyEquivalent: ""
+    )
+    pinItem.target = self
+    pinItem.tag = 302
+    menu.insertItem(pinItem, at: insertIndex)
+    spaceMenuItems.append(pinItem)
+}
+```
+
+**Design notes:**
+- The item title is dynamic: "Pin Window on Top" when the focused window is not pinned, "Unpin Window" when it is.
+- Tag 302 is used for this dynamic item.
+- The focused window ID detection has a known edge case: when the Jumpee menu opens, macOS may shift focus to Jumpee itself. This means `getFocusedWindowID()` might return Jumpee's own window ID or nil. In practice, this is mitigated because the hotkey (Ctrl+Cmd+P) is the primary interaction path for pinning, and the menu item is a secondary convenience. The menu item will default to "Pin Window on Top" if the focused window cannot be determined.
+- Placement: after the "Move Window To..." submenu and before the "Set Up Window Moving..." item, grouping all window management operations together.
+
+#### 9.4 New @objc Action Methods
+
+**Insert near the other action methods (after `moveWindowFromPopup` at line 837):**
+
+```swift
+@objc private func pinWindowAction(_ sender: NSMenuItem) {
+    statusItem.menu?.cancelTracking()
+    // Short delay for menu to close and target app to regain focus
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        self?.togglePinWindow()
+    }
+}
+
+@objc private func editPinWindowHotkey() {
+    editHotkey(slot: .pinWindow)
+}
+```
+
+**Design notes:**
+- `pinWindowAction` uses the same 300ms delay pattern as `navigateToSpace(_:)` and `moveWindowToSpace(_:)` -- this ensures the previously focused app regains focus after the Jumpee menu closes.
+- `editPinWindowHotkey` delegates to the existing `editHotkey(slot:)` method.
+
+#### 9.5 rebuildSpaceItems() Hotkey Title Updates
+
+**Location:** `Sources/main.swift`, inside `rebuildSpaceItems()`, after the existing hotkey title update block (lines 1136-1147).
+
+**Insert after line 1147** (after the tag 301 update block closing brace):
+
+```swift
+if let item = menu.item(withTag: 303) {
+    if config.pinWindow?.enabled == true {
+        item.title = "Pin Window Hotkey: \(config.effectivePinWindowHotkey.displayString)..."
+        item.isHidden = false
+    } else {
+        item.isHidden = true
+    }
+}
+```
+
+#### 9.6 editHotkey(slot:) Extension for .pinWindow
+
+**Location:** `Sources/main.swift`, inside `editHotkey(slot:)` (lines 1355-1500).
+
+**Change the switch block at lines 1361-1372 from:**
+
+```swift
+switch slot {
+case .dropdown:
+    currentConfig = config.hotkey
+    slotName = "Dropdown"
+    defaultConfig = HotkeyConfig(key: "j", modifiers: ["command"])
+    otherConfig = config.effectiveMoveWindowHotkey
+case .moveWindow:
+    currentConfig = config.effectiveMoveWindowHotkey
+    slotName = "Move Window"
+    defaultConfig = HotkeyConfig(key: "m", modifiers: ["command"])
+    otherConfig = config.hotkey
+}
+```
+
+**Change to:**
+
+```swift
+// Collect all other active hotkey configs for conflict checking
+var otherConfigs: [HotkeyConfig] = []
+
+switch slot {
+case .dropdown:
+    currentConfig = config.hotkey
+    slotName = "Dropdown"
+    defaultConfig = HotkeyConfig(key: "j", modifiers: ["command"])
+    if config.moveWindow?.enabled == true {
+        otherConfigs.append(config.effectiveMoveWindowHotkey)
+    }
+    if config.pinWindow?.enabled == true {
+        otherConfigs.append(config.effectivePinWindowHotkey)
+    }
+case .moveWindow:
+    currentConfig = config.effectiveMoveWindowHotkey
+    slotName = "Move Window"
+    defaultConfig = HotkeyConfig(key: "m", modifiers: ["command"])
+    otherConfigs.append(config.hotkey)
+    if config.pinWindow?.enabled == true {
+        otherConfigs.append(config.effectivePinWindowHotkey)
+    }
+case .pinWindow:
+    currentConfig = config.effectivePinWindowHotkey
+    slotName = "Pin Window"
+    defaultConfig = HotkeyConfig(key: "p", modifiers: ["command", "control"])
+    otherConfigs.append(config.hotkey)
+    if config.moveWindow?.enabled == true {
+        otherConfigs.append(config.effectiveMoveWindowHotkey)
+    }
+}
+```
+
+**Design notes:**
+- The conflict check changes from a 2-way comparison to N-way. Instead of a single `otherConfig`, we collect all active hotkey configs into `otherConfigs: [HotkeyConfig]`.
+- The conflict validation (lines 1459-1478) must be updated to iterate over `otherConfigs` instead of comparing against a single `otherConfig`.
+
+**Change the conflict check block (lines 1459-1478) from the single `otherConfig` comparison to:**
+
+```swift
+// Check for conflict with any other active Jumpee hotkey
+let newModsNormalized = Set(newModifiers.map { $0.lowercased() })
+for otherConfig in otherConfigs {
+    let otherModsNormalized = Set(otherConfig.modifiers.map { $0.lowercased() })
+    if newConfig.key.lowercased() == otherConfig.key.lowercased()
+        && newModsNormalized == otherModsNormalized {
+        showValidationError(
+            title: "Hotkey Conflict",
+            message: "This combination is already used by another Jumpee hotkey (\(otherConfig.displayString))."
+        )
+        return
+    }
+}
+```
+
+**Change the save block (lines 1480-1485) to add the .pinWindow case:**
+
+```swift
+switch slot {
+case .dropdown:
+    config.hotkey = newConfig
+case .moveWindow:
+    config.moveWindowHotkey = newConfig
+case .pinWindow:
+    config.pinWindowHotkey = newConfig
+}
+```
+
+**Change the reset-to-default block (lines 1489-1498) to add the .pinWindow case:**
+
+```swift
+switch slot {
+case .dropdown:
+    config.hotkey = defaultConfig
+case .moveWindow:
+    config.moveWindowHotkey = defaultConfig
+case .pinWindow:
+    config.pinWindowHotkey = defaultConfig
+}
+```
+
+#### 9.7 reRegisterHotkeys() Extension
+
+**Location:** `Sources/main.swift`, line 1511-1518.
+
+**Change from:**
+
+```swift
+private func reRegisterHotkeys() {
+    hotkeyManager?.register(
+        config: config.hotkey,
+        moveWindowConfig: config.moveWindow?.enabled == true
+            ? config.effectiveMoveWindowHotkey
+            : nil
+    )
+}
+```
+
+**Change to:**
+
+```swift
+private func reRegisterHotkeys() {
+    hotkeyManager?.register(
+        config: config.hotkey,
+        moveWindowConfig: config.moveWindow?.enabled == true
+            ? config.effectiveMoveWindowHotkey
+            : nil,
+        pinWindowConfig: config.pinWindow?.enabled == true
+            ? config.effectivePinWindowHotkey
+            : nil
+    )
+}
+```
+
+#### 9.8 quit() Extension
+
+**Location:** `Sources/main.swift`, line 1534-1538.
+
+**Change from:**
+
+```swift
+@objc private func quit(_ sender: NSMenuItem) {
+    hotkeyManager?.unregister()
+    overlayManager.removeAllOverlays()
+    NSApp.terminate(nil)
+}
+```
+
+**Change to:**
+
+```swift
+@objc private func quit(_ sender: NSMenuItem) {
+    WindowPinner.unpinAll()
+    hotkeyManager?.unregister()
+    overlayManager.removeAllOverlays()
+    NSApp.terminate(nil)
+}
+```
+
+**Design notes:**
+- `WindowPinner.unpinAll()` is called **before** `hotkeyManager?.unregister()` to ensure all pinned windows are restored to their original z-order before the app exits.
+- This prevents orphaned floating windows that would stay on top permanently after Jumpee quits.
+
+### 10. About Dialog Update
+
+**Location:** `Sources/main.swift`, inside `showAboutDialog()` (lines 1304-1345).
+
+**Add to the informative text, after the "Window Moving (optional)" section (line 1331):**
+
+```swift
+4. Window Pinning (optional)
+   Pin any window "always on top" with \
+   Ctrl+Cmd+P (configurable). Set \
+   "pinWindow": {"enabled": true} in your config file.
+```
+
+### 11. Menu Layout After v1.4.0
+
+```
+About Jumpee...
+Jumpee (bold header, disabled)
+---
+Desktops:
+  [display header, if multi-display]
+  [dynamic space items with Cmd+1-9]
+  Rename Current Desktop...         Cmd+N        tag=200
+  Move Window To... >               [submenu]    (if moveWindow.enabled)
+  Pin Window on Top                              tag=302  (if pinWindow.enabled)
+  Set Up Window Moving...                        (if shortcuts not enabled)
+---
+Hide Space Number                                tag=100
+Disable Overlay                                  tag=101
+---
+Hotkeys:                            (disabled)
+  Dropdown Hotkey: Cmd+J...                      tag=300
+  Move Window Hotkey: Cmd+M...                   tag=301 (if moveWindow.enabled)
+  Pin Window Hotkey: Ctrl+Cmd+P...               tag=303 (if pinWindow.enabled)
+---
+Open Config File...                 Cmd+,
+Reload Config                       Cmd+R
+---
+Quit Jumpee                         Cmd+Q
+```
+
+### 12. Configuration Changes
+
+#### New Config Keys
+
+```json
+{
+    "pinWindow": {
+        "enabled": true
+    },
+    "pinWindowHotkey": {
+        "key": "p",
+        "modifiers": ["command", "control"]
+    }
+}
+```
+
+#### Config Behavior Matrix
+
+| Scenario | Behavior |
+|----------|----------|
+| `pinWindow` absent from config | Feature disabled (backward compatible) |
+| `pinWindow.enabled: false` | Feature disabled, no menu items, no hotkey |
+| `pinWindow.enabled: true`, `pinWindowHotkey` absent | Feature enabled, default Ctrl+Cmd+P |
+| `pinWindow.enabled: true`, `pinWindowHotkey` present | Feature enabled, custom hotkey |
+| `pinWindow` present but malformed (e.g., missing `enabled` field) | JSON decode error; `JumpeeConfig.load()` returns default config (existing behavior for any malformed config) |
+
+### 13. Window Level Constants Reference
+
+| Constant | Value | Use in Pin Feature |
+|----------|----------|-----|
+| `kCGNormalWindowLevel` | 0 | Default level; restore target on unpin |
+| `kCGFloatingWindowLevel` | 3 | Pin target; set via `CGWindowLevelForKey(.floatingWindow)` |
+| `kCGModalPanelWindowLevel` | 8 | Not used (too high) |
+| `kCGStatusWindowLevel` | 25 | Not used (would cover menu bar) |
+
+### 14. Insertion Point Summary
+
+This table summarizes where each change goes in `Sources/main.swift`, referenced by line numbers from the current codebase (1567 lines total).
+
+| Change | After Line | Before Line | Description |
+|--------|-----------|-------------|-------------|
+| CGSSetWindowLevel + CGSGetWindowLevel declarations | 29 | 32 | Two new `@_silgen_name` functions |
+| PinWindowConfig struct | 111 | 113 | New Codable struct |
+| pinWindow + pinWindowHotkey fields | 119 | 121 | Two new optional properties on JumpeeConfig |
+| effectivePinWindowHotkey computed property | 125 | 127 | Default hotkey logic |
+| WindowPinner class | 647 | 649 | Full static class (~120 lines) |
+| `.pinWindow` case on HotkeySlot | 653 | 654 | New enum case |
+| `case 3:` in hotkeyEventHandler | 678 | 679 | Dispatch to togglePinWindow() |
+| pinWindowHotkeyRef field | 688 | 689 | New EventHotKeyRef on GlobalHotkeyManager |
+| register() signature change | 691 | 691 | Add pinWindowConfig parameter |
+| Pin hotkey registration block | 731 | 732 | RegisterEventHotKey with id=3 |
+| Pin hotkey unregistration block | 741 | 742 | UnregisterEventHotKey |
+| togglePinWindow() method | 830 | 832 | New method on MenuBarController |
+| pinWindowAction + editPinWindowHotkey | 837 | 839 | New @objc action methods |
+| Pin hotkey menu item in setupMenu() | 933 | 935 | Tag 303, static item |
+| Pin/Unpin dynamic item in rebuildSpaceItems() | 1109 | 1111 | Tag 302, dynamic item |
+| Tag 303 title update in rebuildSpaceItems() | 1147 | 1148 | Update pin hotkey display |
+| .pinWindow case in editHotkey() switch | 1361-1372 | N/A | Extend all three switch blocks |
+| N-way conflict check | 1459-1478 | N/A | Replace 2-way with N-way |
+| reRegisterHotkeys() pinWindowConfig | 1511-1518 | N/A | Pass pin config to register() |
+| WindowPinner.unpinAll() in quit() | 1534 | 1535 | Before hotkeyManager.unregister() |
+| About dialog text | 1331 | 1332 | Mention pin feature |
+
+### 15. Estimated Code Impact
+
+- **New lines added:** ~170-200 lines (WindowPinner class ~120, menu/hotkey integration ~50-80)
+- **Lines modified:** ~40 lines (config struct, register() signature, editHotkey switch, conflict check, reRegisterHotkeys, quit)
+- **Total file size after:** ~1737-1767 lines (from current 1567)
+- **No new files:** All changes in `Sources/main.swift`
+- **No new frameworks:** No additional `-framework` flags in `build.sh`
+- **No new permissions:** Reuses existing Accessibility permission
+
+### 16. Risks and Mitigations
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| `CGSSetWindowLevel` does not work cross-app (WindowServer ownership check) | HIGH | Phase 0 feasibility spike tests this first. If it fails, proceed to Option B (ScreenCaptureKit overlay) per plan-006 |
+| macOS resets window level on focus change or app activation | MEDIUM | If detected in spike, add a periodic timer (e.g., every 2 seconds) to re-assert floating level for all pinned windows |
+| macOS resets window level on space switch | MEDIUM | Re-assert pinned window levels in `spaceDidChange()` handler after space transition |
+| Private API `CGSSetWindowLevel` removed in future macOS version | MEDIUM | Feature-gated via `pinWindow.enabled`; graceful failure (log + no-op); `CGSGetWindowLevel` return value checked before attempting set |
+| Menu item shows wrong pin state (focus shifts to Jumpee on menu open) | MEDIUM | Hotkey is the primary interaction path; menu item is secondary convenience. Accept that menu item may sometimes show "Pin Window on Top" even for a pinned window |
+| Ctrl+Cmd+P conflicts with some niche application | LOW | Fully configurable via hotkey editor; Ctrl+Cmd combination is rarely used by standard apps |
+| Closed windows leave orphan entries in pinnedWindows | LOW | `cleanupClosedWindows()` called at start of `togglePin()` and in `rebuildSpaceItems()` |
+| Quitting Jumpee with pinned windows leaves them floating | LOW | `unpinAll()` called in `quit()` before `NSApp.terminate()` |

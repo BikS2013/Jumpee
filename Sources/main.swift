@@ -28,6 +28,19 @@ func CGSSetSymbolicHotKeyEnabled(_ hotKey: CGSSymbolicHotKey, _ enabled: Bool) -
 @_silgen_name("_AXUIElementGetWindow")
 func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
 
+// Private CGS APIs for window level manipulation (pin window on top)
+@_silgen_name("CGSSetWindowLevel")
+func CGSSetWindowLevel(_ connection: Int32, _ windowID: CGWindowID, _ level: Int32) -> CGError
+
+@_silgen_name("CGSGetWindowLevel")
+func CGSGetWindowLevel(_ connection: Int32, _ windowID: CGWindowID, _ level: UnsafeMutablePointer<Int32>) -> CGError
+
+// CGWindowListCreateImage — marked obsoleted in macOS 15 SDK headers but the symbol
+// still exists at runtime. We call it via @_silgen_name to bypass the SDK availability
+// check, the same approach Jumpee uses for all other private/restricted APIs.
+@_silgen_name("CGWindowListCreateImage")
+func JumpeeCGWindowListCreateImage(_ screenBounds: CGRect, _ listOption: UInt32, _ windowID: CGWindowID, _ imageOption: UInt32) -> CGImage?
+
 
 // MARK: - Configuration
 
@@ -110,6 +123,12 @@ struct MoveWindowConfig: Codable {
     var enabled: Bool
 }
 
+struct PinWindowConfig: Codable {
+    /// Whether the pin-window-on-top feature is enabled.
+    /// When false, the pin menu items and hotkey are hidden/inactive.
+    var enabled: Bool
+}
+
 struct JumpeeConfig: Codable {
     var spaces: [String: String]
     var showSpaceNumber: Bool
@@ -117,11 +136,19 @@ struct JumpeeConfig: Codable {
     var hotkey: HotkeyConfig
     var moveWindow: MoveWindowConfig?
     var moveWindowHotkey: HotkeyConfig?
+    var pinWindow: PinWindowConfig?
+    var pinWindowHotkey: HotkeyConfig?
 
     /// Resolved move-window hotkey: explicit config or default Cmd+M.
     /// Documented exception to the no-default-fallback rule (see Issues - Pending Items.md).
     var effectiveMoveWindowHotkey: HotkeyConfig {
         return moveWindowHotkey ?? HotkeyConfig(key: "m", modifiers: ["command"])
+    }
+
+    /// Resolved pin-window hotkey: explicit config or default Ctrl+Cmd+P.
+    /// Documented exception to the no-default-fallback rule (see Issues - Pending Items.md).
+    var effectivePinWindowHotkey: HotkeyConfig {
+        return pinWindowHotkey ?? HotkeyConfig(key: "p", modifiers: ["control", "command"])
     }
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
@@ -646,11 +673,344 @@ class WindowMover {
     }
 }
 
+// MARK: - Pin Overlay Window
+
+/// A borderless, floating, click-through window that mirrors another app's window
+/// using CGWindowListCreateImage. This is how Jumpee makes a foreign window appear
+/// "always on top" — macOS blocks cross-process window level changes, so we capture
+/// the target window and display it in our own floating window.
+class PinOverlayWindow: NSWindow {
+    let targetWindowID: CGWindowID
+    private let imageView: NSImageView
+    private var updateTimer: Timer?
+    private var lastQuartzBounds: CGRect = .zero
+    private var isTargetBeingDragged = false
+    private var dragCheckCounter = 0
+
+    init(targetWindowID: CGWindowID, frame: NSRect, initialQuartzBounds: CGRect) {
+        self.targetWindowID = targetWindowID
+        self.lastQuartzBounds = initialQuartzBounds
+        self.imageView = NSImageView()
+
+        super.init(
+            contentRect: frame,
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+
+        self.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.floatingWindow)))
+        self.backgroundColor = .clear
+        self.isOpaque = false
+        self.hasShadow = true
+        self.ignoresMouseEvents = true
+        self.collectionBehavior = [.transient]
+
+        imageView.frame = NSRect(origin: .zero, size: frame.size)
+        imageView.imageScaling = .scaleAxesIndependently
+        imageView.autoresizingMask = [.width, .height]
+        self.contentView = imageView
+
+        // Initial capture
+        captureAndDisplay()
+
+        // High-frequency timer for smooth tracking (~60 fps)
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.refreshCapture()
+        }
+        // Ensure timer fires during mouse tracking (event loop modes)
+        RunLoop.main.add(updateTimer!, forMode: .common)
+    }
+
+    func stopUpdating() {
+        updateTimer?.invalidate()
+        updateTimer = nil
+    }
+
+    private func refreshCapture() {
+        // Check if the target window still exists and get its current bounds
+        guard let info = PinOverlayWindow.getWindowInfo(targetWindowID) else {
+            print("[Jumpee:Pin] Target window \(targetWindowID) closed, removing overlay")
+            stopUpdating()
+            WindowPinner.removePinForClosedWindow(self.targetWindowID)
+            return
+        }
+
+        let currentQuartzBounds = info.bounds
+
+        // Detect if window is being dragged (position changing rapidly)
+        let positionChanged = currentQuartzBounds.origin != lastQuartzBounds.origin
+        let sizeChanged = currentQuartzBounds.size != lastQuartzBounds.size
+
+        if positionChanged || sizeChanged {
+            // During movement: hide overlay to avoid ghost/lag, just track position
+            if positionChanged && !sizeChanged {
+                dragCheckCounter += 1
+                if dragCheckCounter > 2 && !isTargetBeingDragged {
+                    isTargetBeingDragged = true
+                    self.alphaValue = 0  // Hide during drag
+                }
+            }
+
+            let cocoaFrame = PinOverlayWindow.quartzToCocoaRect(currentQuartzBounds)
+            self.setFrame(cocoaFrame, display: false)
+            lastQuartzBounds = currentQuartzBounds
+        } else {
+            // Window is stationary
+            if isTargetBeingDragged {
+                // Drag ended — re-show overlay with fresh capture
+                isTargetBeingDragged = false
+                dragCheckCounter = 0
+                captureAndDisplay()
+                self.alphaValue = 1
+                return
+            }
+            dragCheckCounter = 0
+        }
+
+        // Only capture when not dragging (saves CPU and avoids ghost images)
+        if !isTargetBeingDragged {
+            captureAndDisplay()
+        }
+    }
+
+    private func captureAndDisplay() {
+        // Capture just the target window using our @_silgen_name wrapper
+        // Options: kCGWindowListOptionIncludingWindow = 1 << 3 = 8
+        // Image options: kCGWindowImageBoundsIgnoreFraming = 1 << 0 = 1, kCGWindowImageBestResolution = 1 << 3 = 8
+        guard let cgImage = JumpeeCGWindowListCreateImage(
+            .null,
+            8,  // kCGWindowListOptionIncludingWindow
+            targetWindowID,
+            1 | 8  // boundsIgnoreFraming | bestResolution
+        ) else { return }
+
+        let nsImage = NSImage(cgImage: cgImage, size: self.frame.size)
+        imageView.image = nsImage
+    }
+
+    /// Get window info (bounds, title) from CGWindowListCopyWindowInfo.
+    static func getWindowInfo(_ windowID: CGWindowID) -> (bounds: CGRect, title: String)? {
+        guard let windowList = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] else {
+            return nil
+        }
+
+        for info in windowList {
+            guard let wid = info[kCGWindowNumber as String] as? CGWindowID,
+                  wid == windowID else { continue }
+
+            guard let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat] else { continue }
+            let bounds = CGRect(
+                x: boundsDict["X"] ?? 0,
+                y: boundsDict["Y"] ?? 0,
+                width: boundsDict["Width"] ?? 0,
+                height: boundsDict["Height"] ?? 0
+            )
+
+            let title = info[kCGWindowName as String] as? String ?? ""
+            return (bounds: bounds, title: title)
+        }
+        return nil
+    }
+
+    /// Convert Quartz screen coordinates (origin top-left) to Cocoa coordinates (origin bottom-left).
+    static func quartzToCocoaRect(_ quartzRect: CGRect) -> NSRect {
+        guard let mainScreen = NSScreen.screens.first else { return NSRect(origin: .zero, size: quartzRect.size) }
+        let screenHeight = mainScreen.frame.height
+        return NSRect(
+            x: quartzRect.origin.x,
+            y: screenHeight - quartzRect.origin.y - quartzRect.height,
+            width: quartzRect.width,
+            height: quartzRect.height
+        )
+    }
+
+    deinit {
+        stopUpdating()
+    }
+}
+
+// MARK: - Window Pinner
+
+class WindowPinner {
+    /// Active overlay windows, keyed by target window ID.
+    private static var overlays: [CGWindowID: PinOverlayWindow] = [:]
+
+    /// Toggle pin state of the currently focused window.
+    @discardableResult
+    static func togglePin() -> String? {
+        guard let windowID = getFocusedWindowID() else {
+            print("[Jumpee:Pin] Failed: could not get focused window ID")
+            return nil
+        }
+        print("[Jumpee:Pin] Focused window ID: \(windowID)")
+
+        if isPinned(windowID) {
+            return unpin(windowID)
+        } else {
+            return pin(windowID)
+        }
+    }
+
+    /// Pin a window by creating a floating overlay that mirrors it.
+    static func pin(_ windowID: CGWindowID) -> String? {
+        // Check if Screen Recording permission is available by trying a capture
+        guard let testImage = JumpeeCGWindowListCreateImage(
+            .null, 8, windowID, 1  // optionIncludingWindow, boundsIgnoreFraming
+        ) else {
+            print("[Jumpee:Pin] CGWindowListCreateImage returned nil — Screen Recording permission may be needed")
+            promptForScreenRecording()
+            return nil
+        }
+
+        // Verify the capture isn't blank (permission denied returns a 1x1 or empty image)
+        if testImage.width <= 1 || testImage.height <= 1 {
+            print("[Jumpee:Pin] Captured image is blank — Screen Recording permission needed")
+            promptForScreenRecording()
+            return nil
+        }
+
+        // Get the target window's current bounds
+        guard let info = PinOverlayWindow.getWindowInfo(windowID) else {
+            print("[Jumpee:Pin] Could not get window info for \(windowID)")
+            return nil
+        }
+
+        let cocoaFrame = PinOverlayWindow.quartzToCocoaRect(info.bounds)
+        let overlay = PinOverlayWindow(targetWindowID: windowID, frame: cocoaFrame, initialQuartzBounds: info.bounds)
+        overlay.orderFront(nil)
+
+        overlays[windowID] = overlay
+        print("[Jumpee:Pin] Pinned window \(windowID) (\(info.title)) with capture overlay")
+        return "pinned"
+    }
+
+    /// Unpin a window by removing its overlay.
+    static func unpin(_ windowID: CGWindowID) -> String? {
+        guard let overlay = overlays[windowID] else {
+            print("[Jumpee:Pin] Window \(windowID) is not pinned")
+            return nil
+        }
+
+        overlay.stopUpdating()
+        overlay.orderOut(nil)
+        overlays.removeValue(forKey: windowID)
+        print("[Jumpee:Pin] Unpinned window \(windowID)")
+        return "unpinned"
+    }
+
+    /// Unpin all currently pinned windows.
+    static func unpinAll() {
+        for (_, overlay) in overlays {
+            overlay.stopUpdating()
+            overlay.orderOut(nil)
+        }
+        overlays.removeAll()
+    }
+
+    /// Called by PinOverlayWindow when the target window is closed.
+    static func removePinForClosedWindow(_ windowID: CGWindowID) {
+        if let overlay = overlays[windowID] {
+            overlay.orderOut(nil)
+            overlays.removeValue(forKey: windowID)
+        }
+    }
+
+    /// Check if a specific window is currently pinned.
+    static func isPinned(_ windowID: CGWindowID) -> Bool {
+        return overlays[windowID] != nil
+    }
+
+    /// Returns the number of currently pinned windows.
+    static var pinnedCount: Int {
+        return overlays.count
+    }
+
+    /// Check if the currently focused window is pinned.
+    static func isFocusedWindowPinned() -> Bool {
+        guard let windowID = getFocusedWindowID() else { return false }
+        return isPinned(windowID)
+    }
+
+    /// Remove entries for windows that no longer exist.
+    static func cleanupClosedWindows() {
+        let windowList = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
+        let existingIDs = Set(windowList.compactMap { $0[kCGWindowNumber as String] as? CGWindowID })
+
+        for windowID in overlays.keys {
+            if !existingIDs.contains(windowID) {
+                overlays[windowID]?.stopUpdating()
+                overlays[windowID]?.orderOut(nil)
+                overlays.removeValue(forKey: windowID)
+            }
+        }
+    }
+
+    /// Prompt the user to grant Screen Recording permission.
+    private static func promptForScreenRecording() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Screen Recording Permission Required"
+            alert.informativeText = """
+                To pin windows on top, Jumpee needs Screen Recording \
+                permission to capture the window content.
+
+                1. Open System Settings > Privacy & Security > Screen Recording
+                2. Enable Jumpee
+                3. Try pinning again
+
+                (Jumpee does not record your screen — it only captures \
+                the pinned window to display it above other windows.)
+                """
+            alert.addButton(withTitle: "Open System Settings")
+            alert.addButton(withTitle: "Cancel")
+
+            NSApp.activate(ignoringOtherApps: true)
+            let response = alert.runModal()
+
+            if response == .alertFirstButtonReturn {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
+    }
+
+    // MARK: - Focused window helpers
+
+    /// Get the focused app's AXUIElement and its focused window AXUIElement.
+    static func getFocusedAppAndWindow() -> (AXUIElement, AXUIElement)? {
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedApp: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedApp) == .success else {
+            return nil
+        }
+
+        var focusedWindow: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(focusedApp as! AXUIElement, kAXFocusedWindowAttribute as CFString, &focusedWindow) == .success else {
+            return nil
+        }
+
+        return (focusedApp as! AXUIElement, focusedWindow as! AXUIElement)
+    }
+
+    /// Get the CGWindowID of the currently focused window via Accessibility API.
+    static func getFocusedWindowID() -> CGWindowID? {
+        guard let (_, windowElement) = getFocusedAppAndWindow() else { return nil }
+
+        var windowID: CGWindowID = 0
+        let err = _AXUIElementGetWindow(windowElement, &windowID)
+        guard err == .success, windowID != 0 else { return nil }
+        return windowID
+    }
+}
+
 // MARK: - Hotkey Slot
 
 private enum HotkeySlot {
     case dropdown
     case moveWindow
+    case pinWindow
 }
 
 // MARK: - Global Hotkey Manager (Carbon API)
@@ -676,6 +1036,8 @@ func hotkeyEventHandler(nextHandler: EventHandlerCallRef?, event: EventRef?, use
             globalMenuBarController?.openMenu()
         case 2:
             globalMenuBarController?.openMoveWindowMenu()
+        case 3:
+            globalMenuBarController?.togglePinWindow()
         default:
             break
         }
@@ -686,9 +1048,10 @@ func hotkeyEventHandler(nextHandler: EventHandlerCallRef?, event: EventRef?, use
 class GlobalHotkeyManager {
     private var hotkeyRef: EventHotKeyRef?
     private var moveWindowHotkeyRef: EventHotKeyRef?
+    private var pinWindowHotkeyRef: EventHotKeyRef?
     private var handlerRef: EventHandlerRef?
 
-    func register(config: HotkeyConfig, moveWindowConfig: HotkeyConfig?) {
+    func register(config: HotkeyConfig, moveWindowConfig: HotkeyConfig?, pinWindowConfig: HotkeyConfig?) {
         unregister()
 
         var eventType = EventTypeSpec(
@@ -729,6 +1092,19 @@ class GlobalHotkeyManager {
                 &moveWindowHotkeyRef
             )
         }
+
+        // Register pin-window hotkey (id=3), only if config provided
+        if let pwConfig = pinWindowConfig, let keyCode = pwConfig.keyCode {
+            let pinWindowID = EventHotKeyID(signature: OSType(0x4A4D_5045), id: 3)
+            RegisterEventHotKey(
+                UInt32(keyCode),
+                pwConfig.carbonModifiers,
+                pinWindowID,
+                GetApplicationEventTarget(),
+                0,
+                &pinWindowHotkeyRef
+            )
+        }
     }
 
     func unregister() {
@@ -739,6 +1115,10 @@ class GlobalHotkeyManager {
         if let ref = moveWindowHotkeyRef {
             UnregisterEventHotKey(ref)
             moveWindowHotkeyRef = nil
+        }
+        if let ref = pinWindowHotkeyRef {
+            UnregisterEventHotKey(ref)
+            pinWindowHotkeyRef = nil
         }
         if let ref = handlerRef {
             RemoveEventHandler(ref)
@@ -931,6 +1311,16 @@ class MenuBarController: NSObject {
         moveHotkeyItem.tag = 301
         moveHotkeyItem.isHidden = !(config.moveWindow?.enabled == true)
         menu.addItem(moveHotkeyItem)
+
+        let pinHotkeyItem = NSMenuItem(
+            title: "Pin Window Hotkey: \(config.effectivePinWindowHotkey.displayString)...",
+            action: #selector(editPinWindowHotkey),
+            keyEquivalent: ""
+        )
+        pinHotkeyItem.target = self
+        pinHotkeyItem.tag = 302
+        pinHotkeyItem.isHidden = !(config.pinWindow?.enabled == true)
+        menu.addItem(pinHotkeyItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -1126,6 +1516,40 @@ class MenuBarController: NSObject {
             }
         }
 
+        // --- Pin Window items (after Move Window section) ---
+        if config.pinWindow?.enabled == true {
+            insertIndex += 1
+
+            let sep = NSMenuItem.separator()
+            menu.insertItem(sep, at: insertIndex)
+            spaceMenuItems.append(sep)
+            insertIndex += 1
+
+            // Clean up stale entries before building menu
+            WindowPinner.cleanupClosedWindows()
+
+            let isPinned = WindowPinner.isFocusedWindowPinned()
+            let pinTitle = isPinned ? "Unpin Current Window" : "Pin Current Window on Top"
+            let pinItem = NSMenuItem(title: pinTitle,
+                                       action: #selector(pinWindowAction),
+                                       keyEquivalent: "")
+            pinItem.target = self
+            pinItem.tag = 400
+            menu.insertItem(pinItem, at: insertIndex)
+            spaceMenuItems.append(pinItem)
+
+            if WindowPinner.pinnedCount > 0 {
+                insertIndex += 1
+                let unpinAllItem = NSMenuItem(title: "Unpin All Windows (\(WindowPinner.pinnedCount))",
+                                                action: #selector(unpinAllWindows),
+                                                keyEquivalent: "")
+                unpinAllItem.target = self
+                unpinAllItem.tag = 401
+                menu.insertItem(unpinAllItem, at: insertIndex)
+                spaceMenuItems.append(unpinAllItem)
+            }
+        }
+
         if let toggleItem = menu.item(withTag: 100) {
             toggleItem.title = config.showSpaceNumber ? "Hide Space Number" : "Show Space Number"
         }
@@ -1140,6 +1564,14 @@ class MenuBarController: NSObject {
         if let item = menu.item(withTag: 301) {
             if config.moveWindow?.enabled == true {
                 item.title = "Move Window Hotkey: \(config.effectiveMoveWindowHotkey.displayString)..."
+                item.isHidden = false
+            } else {
+                item.isHidden = true
+            }
+        }
+        if let item = menu.item(withTag: 302) {
+            if config.pinWindow?.enabled == true {
+                item.title = "Pin Window Hotkey: \(config.effectivePinWindowHotkey.displayString)..."
                 item.isHidden = false
             } else {
                 item.isHidden = true
@@ -1194,6 +1626,29 @@ class MenuBarController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             WindowMover.moveToSpace(index: targetGlobalPosition)
         }
+    }
+
+    /// Toggle pin state of the focused window. Called from hotkey (id=3).
+    func togglePinWindow() {
+        guard config.pinWindow?.enabled == true else { return }
+        // Small delay to let Jumpee release focus back to the target app
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            WindowPinner.togglePin()
+        }
+    }
+
+    /// Pin/unpin action from the menu.
+    @objc private func pinWindowAction() {
+        statusItem.menu?.cancelTracking()
+        // Wait for menu to close so the previously-focused app regains focus
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            WindowPinner.togglePin()
+        }
+    }
+
+    /// Unpin all pinned windows.
+    @objc private func unpinAllWindows() {
+        WindowPinner.unpinAll()
     }
 
     /// Show a setup dialog guiding the user to enable "Move window to Desktop N"
@@ -1329,6 +1784,11 @@ class MenuBarController: NSObject {
                Same shortcuts as above must be enabled. Then set \
                "moveWindow": {"enabled": true} in your config file.
 
+            4. Pin Window on Top (optional)
+               Pin any window to float above all others. Set \
+               "pinWindow": {"enabled": true} in your config file. \
+               Default hotkey: Ctrl+Cmd+P (toggle pin/unpin).
+
             --- Configuration ---
 
             Config file: ~/.Jumpee/config.json
@@ -1352,23 +1812,45 @@ class MenuBarController: NSObject {
         editHotkey(slot: .moveWindow)
     }
 
+    @objc private func editPinWindowHotkey() {
+        editHotkey(slot: .pinWindow)
+    }
+
     private func editHotkey(slot: HotkeySlot) {
         let currentConfig: HotkeyConfig
         let slotName: String
         let defaultConfig: HotkeyConfig
-        let otherConfig: HotkeyConfig
+
+        // Collect all OTHER active hotkeys for N-way conflict checking
+        var otherHotkeys: [(name: String, config: HotkeyConfig)] = []
 
         switch slot {
         case .dropdown:
             currentConfig = config.hotkey
             slotName = "Dropdown"
             defaultConfig = HotkeyConfig(key: "j", modifiers: ["command"])
-            otherConfig = config.effectiveMoveWindowHotkey
+            if config.moveWindow?.enabled == true {
+                otherHotkeys.append(("Move Window", config.effectiveMoveWindowHotkey))
+            }
+            if config.pinWindow?.enabled == true {
+                otherHotkeys.append(("Pin Window", config.effectivePinWindowHotkey))
+            }
         case .moveWindow:
             currentConfig = config.effectiveMoveWindowHotkey
             slotName = "Move Window"
             defaultConfig = HotkeyConfig(key: "m", modifiers: ["command"])
-            otherConfig = config.hotkey
+            otherHotkeys.append(("Dropdown", config.hotkey))
+            if config.pinWindow?.enabled == true {
+                otherHotkeys.append(("Pin Window", config.effectivePinWindowHotkey))
+            }
+        case .pinWindow:
+            currentConfig = config.effectivePinWindowHotkey
+            slotName = "Pin Window"
+            defaultConfig = HotkeyConfig(key: "p", modifiers: ["control", "command"])
+            otherHotkeys.append(("Dropdown", config.hotkey))
+            if config.moveWindow?.enabled == true {
+                otherHotkeys.append(("Move Window", config.effectiveMoveWindowHotkey))
+            }
         }
 
         let alert = NSAlert()
@@ -1456,22 +1938,15 @@ class MenuBarController: NSObject {
                 return
             }
 
-            // Check for conflict with the other Jumpee hotkey
+            // Check for conflict with all other active Jumpee hotkeys
             let newModsNormalized = Set(newModifiers.map { $0.lowercased() })
-            let otherModsNormalized = Set(otherConfig.modifiers.map { $0.lowercased() })
-            if newConfig.key.lowercased() == otherConfig.key.lowercased()
-                && newModsNormalized == otherModsNormalized {
-                let otherIsActive: Bool
-                switch slot {
-                case .dropdown:
-                    otherIsActive = config.moveWindow?.enabled == true
-                case .moveWindow:
-                    otherIsActive = true
-                }
-                if otherIsActive {
+            for other in otherHotkeys {
+                let otherModsNormalized = Set(other.config.modifiers.map { $0.lowercased() })
+                if newConfig.key.lowercased() == other.config.key.lowercased()
+                    && newModsNormalized == otherModsNormalized {
                     showValidationError(
                         title: "Hotkey Conflict",
-                        message: "This combination is already used by the other Jumpee hotkey (\(otherConfig.displayString))."
+                        message: "This combination is already used by the \(other.name) hotkey (\(other.config.displayString))."
                     )
                     return
                 }
@@ -1482,6 +1957,8 @@ class MenuBarController: NSObject {
                 config.hotkey = newConfig
             case .moveWindow:
                 config.moveWindowHotkey = newConfig
+            case .pinWindow:
+                config.pinWindowHotkey = newConfig
             }
             config.save()
             reRegisterHotkeys()
@@ -1493,6 +1970,8 @@ class MenuBarController: NSObject {
                 config.hotkey = defaultConfig
             case .moveWindow:
                 config.moveWindowHotkey = defaultConfig
+            case .pinWindow:
+                config.pinWindowHotkey = defaultConfig
             }
             config.save()
             reRegisterHotkeys()
@@ -1513,6 +1992,9 @@ class MenuBarController: NSObject {
             config: config.hotkey,
             moveWindowConfig: config.moveWindow?.enabled == true
                 ? config.effectiveMoveWindowHotkey
+                : nil,
+            pinWindowConfig: config.pinWindow?.enabled == true
+                ? config.effectivePinWindowHotkey
                 : nil
         )
     }
@@ -1532,6 +2014,7 @@ class MenuBarController: NSObject {
     }
 
     @objc private func quit(_ sender: NSMenuItem) {
+        WindowPinner.unpinAll()
         hotkeyManager?.unregister()
         overlayManager.removeAllOverlays()
         NSApp.terminate(nil)
