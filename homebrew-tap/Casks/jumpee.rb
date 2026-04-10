@@ -1,17 +1,11 @@
 cask "jumpee" do
-  version "1.1.0"
-  sha256 "d22dfa03fb73903e0916c7bf46f4116b4738b30c13faf7ea8ff8a3aea3455435"
+  version "1.2.0"
+  sha256 "ac50811684b615a4f4757fb5b3487adc87fb5f2a6d699d9a40a0cc60f609a48c"
 
-  # TODO: Replace with your GitHub release URL after pushing to GitHub
-  # url "https://github.com/BikS2013/jumpee/releases/download/v#{version}/Jumpee-#{version}.zip"
-  #
-  # For local development, use file URL (uncomment and adjust path):
-  # url "file:///Users/giorgosmarinos/aiwork/coding-platform/macbook-desktop/Jumpee/dist/Jumpee-#{version}.zip"
-
-  url "https://github.com/BikS2013/jumpee/releases/download/v#{version}/Jumpee-#{version}.zip"
+  url "https://github.com/BikS2013/Jumpee/releases/download/v#{version}/Jumpee-#{version}.zip"
   name "Jumpee"
   desc "macOS menu bar app for naming and jumping between Mission Control desktops"
-  homepage "https://github.com/BikS2013/jumpee"
+  homepage "https://github.com/BikS2013/Jumpee"
 
   depends_on macos: ">= :ventura"
 
