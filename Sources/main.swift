@@ -129,6 +129,66 @@ struct PinWindowConfig: Codable {
     var enabled: Bool
 }
 
+struct InputSourceIndicatorConfig: Codable {
+    // --- Required field ---
+    var enabled: Bool
+
+    // --- Optional appearance fields (nil = use documented default) ---
+    var fontSize: Double?
+    var fontName: String?
+    var fontWeight: String?          // "regular", "bold", "heavy", "light", "medium", etc.
+    var textColor: String?           // Hex color string, e.g. "#FFFFFF"
+    var opacity: Double?             // 0.0 - 1.0 for text opacity
+    var backgroundColor: String?     // Hex color string for background pill
+    var backgroundOpacity: Double?   // 0.0 - 1.0 for background opacity
+    var backgroundCornerRadius: Double?  // Corner radius in points
+    var verticalOffset: Double?      // Additional pixels below menu bar
+    var languageColors: [String: String]?  // Map of input source name to hex color, e.g. {"Greek": "#0066FF"}
+    var languageLabels: [String: String]?  // Map of input source name to display text, e.g. {"Greek": "ΕΛ", "U.S.": "EN"}
+
+    // --- Documented default constants ---
+    // (Exception to no-default-fallback rule: see Issues - Pending Items.md, item 16.
+    //  Follows precedent of moveWindowHotkey item 11 and pinWindowHotkey item 12.)
+    static let defaultFontSize: Double = 60
+    static let defaultFontName: String = "Helvetica Neue"
+    static let defaultFontWeight: String = "bold"
+    static let defaultTextColor: String = "#FFFFFF"
+    static let defaultOpacity: Double = 0.8
+    static let defaultBackgroundColor: String = "#000000"
+    static let defaultBackgroundOpacity: Double = 0.3
+    static let defaultBackgroundCornerRadius: Double = 10
+    static let defaultVerticalOffset: Double = 0
+
+    // --- Resolved computed properties ---
+    var effectiveFontSize: Double { fontSize ?? Self.defaultFontSize }
+    var effectiveFontName: String { fontName ?? Self.defaultFontName }
+    var effectiveFontWeight: String { fontWeight ?? Self.defaultFontWeight }
+    var effectiveTextColor: String { textColor ?? Self.defaultTextColor }
+    var effectiveOpacity: Double { opacity ?? Self.defaultOpacity }
+    var effectiveBackgroundColor: String { backgroundColor ?? Self.defaultBackgroundColor }
+    var effectiveBackgroundOpacity: Double { backgroundOpacity ?? Self.defaultBackgroundOpacity }
+    var effectiveBackgroundCornerRadius: Double { backgroundCornerRadius ?? Self.defaultBackgroundCornerRadius }
+    var effectiveVerticalOffset: Double { verticalOffset ?? Self.defaultVerticalOffset }
+
+    /// Returns the display text for a given input source name.
+    /// Checks languageLabels map first, falls back to the raw input source name.
+    func effectiveDisplayText(for inputSourceName: String) -> String {
+        if let labels = languageLabels, let label = labels[inputSourceName] {
+            return label
+        }
+        return inputSourceName
+    }
+
+    /// Returns the text color for a given input source name.
+    /// Checks languageColors map first, falls back to the general textColor setting.
+    func effectiveTextColor(for inputSourceName: String) -> String {
+        if let langColors = languageColors, let color = langColors[inputSourceName] {
+            return color
+        }
+        return effectiveTextColor
+    }
+}
+
 struct JumpeeConfig: Codable {
     var spaces: [String: String]
     var showSpaceNumber: Bool
@@ -138,6 +198,7 @@ struct JumpeeConfig: Codable {
     var moveWindowHotkey: HotkeyConfig?
     var pinWindow: PinWindowConfig?
     var pinWindowHotkey: HotkeyConfig?
+    var inputSourceIndicator: InputSourceIndicatorConfig?
 
     /// Resolved move-window hotkey: explicit config or default Cmd+M.
     /// Documented exception to the no-default-fallback rule (see Issues - Pending Items.md).
@@ -496,6 +557,254 @@ class OverlayManager {
     func removeAllOverlays() {
         overlayWindow?.orderOut(nil)
         overlayWindow = nil
+    }
+}
+
+// MARK: - Input Source Indicator Window
+
+class InputSourceIndicatorWindow: NSWindow {
+    private let label: NSTextField
+    private let backgroundView: NSView
+    private let horizontalPadding: CGFloat = 20
+    private let verticalPadding: CGFloat = 8
+
+    init(screen: NSScreen, text: String, config: InputSourceIndicatorConfig, statusItemFrame: NSRect? = nil) {
+        let displayText = config.effectiveDisplayText(for: text)
+        label = NSTextField(labelWithString: displayText)
+        backgroundView = NSView()
+        backgroundView.wantsLayer = true
+
+        // Apply font styling
+        let weight = fontWeight(from: config.effectiveFontWeight)
+        let font = NSFont(name: config.effectiveFontName, size: CGFloat(config.effectiveFontSize))
+            ?? NSFont.systemFont(ofSize: CGFloat(config.effectiveFontSize), weight: weight)
+        let color = NSColor.fromHex(config.effectiveTextColor(for: text))
+            .withAlphaComponent(CGFloat(config.effectiveOpacity))
+
+        label.font = font
+        label.textColor = color
+        label.backgroundColor = .clear
+        label.isBezeled = false
+        label.isEditable = false
+        label.isSelectable = false
+        label.alignment = .center
+        label.sizeToFit()
+
+        let textSize = label.fittingSize
+        let windowWidth = textSize.width + 20 * 2   // horizontalPadding
+        let windowHeight = textSize.height + 8 * 2  // verticalPadding
+        let windowSize = NSSize(width: windowWidth, height: windowHeight)
+
+        let mbHeight = screen.frame.maxY - screen.visibleFrame.maxY
+        let verticalOffset = CGFloat(config.effectiveVerticalOffset)
+        let x: CGFloat
+        if let sFrame = statusItemFrame {
+            x = sFrame.origin.x + (sFrame.width - windowSize.width) / 2
+        } else {
+            x = screen.frame.origin.x + (screen.frame.width - windowSize.width) / 2
+        }
+        let y = screen.frame.maxY - mbHeight - windowSize.height - verticalOffset
+        let rect = NSRect(x: x, y: y, width: windowSize.width, height: windowSize.height)
+
+        super.init(
+            contentRect: rect,
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+
+        self.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.floatingWindow)) + 1)
+        self.backgroundColor = .clear
+        self.isOpaque = false
+        self.hasShadow = false
+        self.ignoresMouseEvents = true
+        self.collectionBehavior = [.canJoinAllSpaces, .stationary]
+
+        let contentV = NSView(frame: NSRect(origin: .zero, size: windowSize))
+        contentV.wantsLayer = true
+        self.contentView = contentV
+
+        backgroundView.frame = NSRect(origin: .zero, size: windowSize)
+        let bgColor = NSColor.fromHex(config.effectiveBackgroundColor)
+            .withAlphaComponent(CGFloat(config.effectiveBackgroundOpacity))
+        backgroundView.layer?.backgroundColor = bgColor.cgColor
+        backgroundView.layer?.cornerRadius = CGFloat(config.effectiveBackgroundCornerRadius)
+        contentV.addSubview(backgroundView)
+
+        label.frame = NSRect(
+            x: horizontalPadding,
+            y: verticalPadding,
+            width: textSize.width,
+            height: textSize.height
+        )
+        backgroundView.addSubview(label)
+    }
+
+    func updateText(_ text: String, config: InputSourceIndicatorConfig, statusItemFrame: NSRect? = nil) {
+        let weight = fontWeight(from: config.effectiveFontWeight)
+        let font = NSFont(name: config.effectiveFontName, size: CGFloat(config.effectiveFontSize))
+            ?? NSFont.systemFont(ofSize: CGFloat(config.effectiveFontSize), weight: weight)
+        let color = NSColor.fromHex(config.effectiveTextColor(for: text))
+            .withAlphaComponent(CGFloat(config.effectiveOpacity))
+
+        label.stringValue = config.effectiveDisplayText(for: text)
+        label.font = font
+        label.textColor = color
+        label.sizeToFit()
+
+        let textSize = label.fittingSize
+        let windowWidth = textSize.width + horizontalPadding * 2
+        let windowHeight = textSize.height + verticalPadding * 2
+        let windowSize = NSSize(width: windowWidth, height: windowHeight)
+
+        guard let screen = self.screen ?? NSScreen.main else { return }
+        let mbHeight = screen.frame.maxY - screen.visibleFrame.maxY
+        let verticalOffset = CGFloat(config.effectiveVerticalOffset)
+        let x: CGFloat
+        if let sFrame = statusItemFrame {
+            x = sFrame.origin.x + (sFrame.width - windowSize.width) / 2
+        } else {
+            x = screen.frame.origin.x + (screen.frame.width - windowSize.width) / 2
+        }
+        let y = screen.frame.maxY - mbHeight - windowSize.height - verticalOffset
+        let rect = NSRect(x: x, y: y, width: windowSize.width, height: windowSize.height)
+
+        self.setFrame(rect, display: true)
+        backgroundView.frame = NSRect(origin: .zero, size: windowSize)
+
+        let bgColor = NSColor.fromHex(config.effectiveBackgroundColor)
+            .withAlphaComponent(CGFloat(config.effectiveBackgroundOpacity))
+        backgroundView.layer?.backgroundColor = bgColor.cgColor
+        backgroundView.layer?.cornerRadius = CGFloat(config.effectiveBackgroundCornerRadius)
+
+        label.frame = NSRect(
+            x: horizontalPadding,
+            y: verticalPadding,
+            width: textSize.width,
+            height: textSize.height
+        )
+    }
+
+    func reposition(on screen: NSScreen, config: InputSourceIndicatorConfig, statusItemFrame: NSRect? = nil) {
+        let currentSize = self.frame.size
+        let mbHeight = screen.frame.maxY - screen.visibleFrame.maxY
+        let verticalOffset = CGFloat(config.effectiveVerticalOffset)
+        let x: CGFloat
+        if let sFrame = statusItemFrame {
+            x = sFrame.origin.x + (sFrame.width - currentSize.width) / 2
+        } else {
+            x = screen.frame.origin.x + (screen.frame.width - currentSize.width) / 2
+        }
+        let y = screen.frame.maxY - mbHeight - currentSize.height - verticalOffset
+        let rect = NSRect(x: x, y: y, width: currentSize.width, height: currentSize.height)
+        self.setFrame(rect, display: true)
+    }
+}
+
+// MARK: - Input Source Indicator Manager
+
+class InputSourceIndicatorManager {
+    private var window: InputSourceIndicatorWindow?
+    private var currentDisplayedName: String = ""
+    private let spaceDetector: SpaceDetector
+    private weak var statusItem: NSStatusItem?
+    private var currentConfig: InputSourceIndicatorConfig?
+    private var isObserving: Bool = false
+
+    init(spaceDetector: SpaceDetector, statusItem: NSStatusItem) {
+        self.spaceDetector = spaceDetector
+        self.statusItem = statusItem
+    }
+
+    private func statusItemFrame() -> NSRect? {
+        return statusItem?.button?.window?.frame
+    }
+
+    func start(config: JumpeeConfig) {
+        guard config.inputSourceIndicator?.enabled == true else { return }
+        let isiConfig = config.inputSourceIndicator!
+        currentConfig = isiConfig
+
+        if !isObserving {
+            DistributedNotificationCenter.default().addObserver(
+                self,
+                selector: #selector(inputSourceDidChange(_:)),
+                name: NSNotification.Name("AppleSelectedInputSourcesChangedNotification"),
+                object: nil,
+                suspensionBehavior: .deliverImmediately
+            )
+            isObserving = true
+        }
+
+        let name = getCurrentInputSourceName()
+        currentDisplayedName = name
+
+        let screen: NSScreen
+        if let spaceInfo = spaceDetector.getCurrentSpaceInfo(),
+           let s = spaceDetector.displayIDToScreen(spaceInfo.displayID) {
+            screen = s
+        } else {
+            screen = NSScreen.main ?? NSScreen.screens.first!
+        }
+
+        window?.orderOut(nil)
+        window = InputSourceIndicatorWindow(screen: screen, text: name, config: isiConfig, statusItemFrame: statusItemFrame())
+        window?.orderFront(nil)
+    }
+
+    func stop() {
+        if isObserving {
+            DistributedNotificationCenter.default().removeObserver(self)
+            isObserving = false
+        }
+        window?.orderOut(nil)
+        window = nil
+        currentDisplayedName = ""
+        currentConfig = nil
+    }
+
+    func updateConfig(_ config: JumpeeConfig) {
+        let wasEnabled = currentConfig != nil
+        let nowEnabled = config.inputSourceIndicator?.enabled == true
+
+        if !wasEnabled && nowEnabled {
+            start(config: config)
+        } else if wasEnabled && !nowEnabled {
+            stop()
+        } else if wasEnabled && nowEnabled {
+            currentConfig = config.inputSourceIndicator
+            let name = getCurrentInputSourceName()
+            currentDisplayedName = name
+            window?.updateText(name, config: currentConfig!, statusItemFrame: statusItemFrame())
+            refresh()
+        }
+    }
+
+    func refresh() {
+        guard let config = currentConfig, config.enabled else { return }
+        guard let spaceInfo = spaceDetector.getCurrentSpaceInfo() else { return }
+        let screen = spaceDetector.displayIDToScreen(spaceInfo.displayID) ?? NSScreen.main
+        guard let targetScreen = screen else { return }
+        window?.reposition(on: targetScreen, config: config, statusItemFrame: statusItemFrame())
+    }
+
+    private func getCurrentInputSourceName() -> String {
+        guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else {
+            return "Unknown"
+        }
+        if let namePtr = TISGetInputSourceProperty(source, kTISPropertyLocalizedName) {
+            let name = Unmanaged<CFString>.fromOpaque(namePtr).takeUnretainedValue() as String
+            return name
+        }
+        return "Unknown"
+    }
+
+    @objc private func inputSourceDidChange(_ notification: Notification) {
+        let newName = getCurrentInputSourceName()
+        guard newName != currentDisplayedName else { return }
+        currentDisplayedName = newName
+        guard let config = currentConfig else { return }
+        window?.updateText(newName, config: config, statusItemFrame: statusItemFrame())
     }
 }
 
@@ -1140,6 +1449,7 @@ class MenuBarController: NSObject {
     private var spaceMenuItems: [NSMenuItem] = []
     private let overlayManager: OverlayManager
     private var hotkeyManager: GlobalHotkeyManager?
+    private var inputSourceManager: InputSourceIndicatorManager?
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -1158,6 +1468,11 @@ class MenuBarController: NSObject {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.overlayManager.updateOverlay(config: self!.config)
+        }
+
+        if config.inputSourceIndicator?.enabled == true {
+            inputSourceManager = InputSourceIndicatorManager(spaceDetector: spaceDetector, statusItem: statusItem)
+            inputSourceManager?.start(config: config)
         }
     }
 
@@ -1286,6 +1601,18 @@ class MenuBarController: NSObject {
         overlayItem.target = self
         overlayItem.tag = 101
         menu.addItem(overlayItem)
+
+        let isiTitle = config.inputSourceIndicator?.enabled == true
+            ? "Disable Input Source Indicator"
+            : "Enable Input Source Indicator"
+        let isiToggleItem = NSMenuItem(
+            title: isiTitle,
+            action: #selector(toggleInputSourceIndicator(_:)),
+            keyEquivalent: ""
+        )
+        isiToggleItem.target = self
+        isiToggleItem.tag = 102
+        menu.addItem(isiToggleItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -1556,6 +1883,11 @@ class MenuBarController: NSObject {
         if let overlayItem = menu.item(withTag: 101) {
             overlayItem.title = config.overlay.enabled ? "Disable Overlay" : "Enable Overlay"
         }
+        if let isiItem = menu.item(withTag: 102) {
+            isiItem.title = config.inputSourceIndicator?.enabled == true
+                ? "Disable Input Source Indicator"
+                : "Enable Input Source Indicator"
+        }
 
         // Update hotkey menu items
         if let item = menu.item(withTag: 300) {
@@ -1596,11 +1928,13 @@ class MenuBarController: NSObject {
     @objc private func spaceDidChange(_ notification: Notification) {
         updateTitle()
         overlayManager.updateOverlay(config: config)
+        inputSourceManager?.refresh()
     }
 
     @objc private func screenParametersDidChange(_ notification: Notification) {
         updateTitle()
         overlayManager.updateOverlay(config: config)
+        inputSourceManager?.refresh()
     }
 
     @objc private func navigateToSpace(_ sender: NSMenuItem) {
@@ -1756,6 +2090,24 @@ class MenuBarController: NSObject {
         overlayManager.updateOverlay(config: config)
     }
 
+    @objc private func toggleInputSourceIndicator(_ sender: NSMenuItem) {
+        if config.inputSourceIndicator == nil {
+            config.inputSourceIndicator = InputSourceIndicatorConfig(enabled: true)
+        } else {
+            config.inputSourceIndicator!.enabled.toggle()
+        }
+        config.save()
+
+        if config.inputSourceIndicator?.enabled == true {
+            if inputSourceManager == nil {
+                inputSourceManager = InputSourceIndicatorManager(spaceDetector: spaceDetector, statusItem: statusItem)
+            }
+            inputSourceManager?.start(config: config)
+        } else {
+            inputSourceManager?.stop()
+        }
+    }
+
     @objc private func showAboutDialog() {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
 
@@ -1788,6 +2140,12 @@ class MenuBarController: NSObject {
                Pin any window to float above all others. Set \
                "pinWindow": {"enabled": true} in your config file. \
                Default hotkey: Ctrl+Cmd+P (toggle pin/unpin).
+
+            5. Input Source Indicator (optional)
+               Shows the active keyboard input source below \
+               the menu bar. Set "inputSourceIndicator": \
+               {"enabled": true} in your config file. \
+               No additional permissions required.
 
             --- Configuration ---
 
@@ -2011,9 +2369,19 @@ class MenuBarController: NSObject {
         updateTitle()
         overlayManager.updateOverlay(config: config)
         reRegisterHotkeys()
+
+        if config.inputSourceIndicator?.enabled == true {
+            if inputSourceManager == nil {
+                inputSourceManager = InputSourceIndicatorManager(spaceDetector: spaceDetector, statusItem: statusItem)
+            }
+            inputSourceManager?.updateConfig(config)
+        } else {
+            inputSourceManager?.stop()
+        }
     }
 
     @objc private func quit(_ sender: NSMenuItem) {
+        inputSourceManager?.stop()
         WindowPinner.unpinAll()
         hotkeyManager?.unregister()
         overlayManager.removeAllOverlays()

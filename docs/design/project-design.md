@@ -1579,3 +1579,852 @@ This table summarizes where each change goes in `Sources/main.swift`, referenced
 | Ctrl+Cmd+P conflicts with some niche application | LOW | Fully configurable via hotkey editor; Ctrl+Cmd combination is rarely used by standard apps |
 | Closed windows leave orphan entries in pinnedWindows | LOW | `cleanupClosedWindows()` called at start of `togglePin()` and in `rebuildSpaceItems()` |
 | Quitting Jumpee with pinned windows leaves them floating | LOW | `unpinAll()` called in `quit()` before `NSApp.terminate()` |
+
+## Input Source Indicator (v1.5.0)
+
+This section describes the detailed technical design for the input source (keyboard language) indicator feature. The requirements are in `docs/reference/refined-request-input-source-indicator.md`. The implementation plan is in `docs/design/plan-007-input-source-indicator.md`. The technical investigation is in `docs/reference/investigation-input-source-indicator.md`. The codebase scan is in `docs/reference/codebase-scan-input-source-indicator.md`.
+
+### Feature Summary
+
+Add an input source monitoring feature that detects the current macOS keyboard input source (e.g., "U.S.", "Greek", "British") and displays it as a large, visible HUD-style indicator overlay positioned directly below the menu bar. The indicator updates in real time via event-driven notifications. The feature is toggled on/off via the config file and a menu item.
+
+**No new frameworks, permissions, or build changes are required.** The TIS (Text Input Source Services) APIs are available through the already-imported `Carbon.HIToolbox`. The `DistributedNotificationCenter` is part of Foundation. No Accessibility or Screen Recording permissions are needed.
+
+### 1. Architecture Overview
+
+The feature follows the established pattern: **Config struct + Window class + Manager class + MenuBarController integration**.
+
+```
++--------------------------------------------+
+|  ~/.Jumpee/config.json                     |
+|  "inputSourceIndicator": {                 |
+|      "enabled": true,                      |
+|      "fontSize": 60, ...                   |
+|  }                                         |
++--------------------+-----------------------+
+                     |
+                     v  (decoded into)
++--------------------------------------------+
+|  InputSourceIndicatorConfig : Codable      |
+|  (struct with optional appearance props    |
+|   and effective* computed properties)      |
++--------------------+-----------------------+
+                     |
+                     v  (consumed by)
++--------------------------------------------+    +------------------------------------------+
+|  InputSourceIndicatorManager               |    |  DistributedNotificationCenter           |
+|  - owns InputSourceIndicatorWindow?        |<---| "AppleSelectedInputSourcesChanged-       |
+|  - subscribes to input source change notif |    |  Notification"                           |
+|  - calls TIS APIs on notification          |    +------------------------------------------+
+|  - creates/updates/destroys window         |
+|  - repositions on space/screen change      |    +------------------------------------------+
++--------------------+-----------------------+    |  TIS APIs (Carbon.HIToolbox)             |
+                     |                            |  TISCopyCurrentKeyboardInputSource()     |
+                     v  (creates)                 |  TISGetInputSourceProperty()             |
++--------------------------------------------+    +------------------------------------------+
+|  InputSourceIndicatorWindow : NSWindow     |
+|  - borderless, click-through, transparent  |
+|  - floatingWindow + 1 level                |
+|  - .canJoinAllSpaces, .stationary          |
+|  - auto-sized to text + padding (pill)     |
+|  - centered below menu bar on active screen|
++--------------------------------------------+
+```
+
+**Integration with MenuBarController:**
+
+```
+MenuBarController
+  |
+  +-- inputSourceManager: InputSourceIndicatorManager?  (new property)
+  |
+  +-- init():            create & start manager if enabled
+  +-- setupMenu():       add toggle item (tag 102)
+  +-- rebuildSpaceItems(): update toggle item title
+  +-- spaceDidChange():  call inputSourceManager?.refresh()
+  +-- screenParametersDidChange(): call inputSourceManager?.refresh()
+  +-- reloadConfig():    start/stop/reconfigure manager
+  +-- quit():            call inputSourceManager?.stop()
+  +-- toggleInputSourceIndicator(): new @objc action method
+```
+
+### 2. New Types — Detailed Interface Definitions
+
+#### 2.1 InputSourceIndicatorConfig (Codable struct)
+
+**Location in main.swift:** After `PinWindowConfig` (line 130), before `struct JumpeeConfig` (line 132).
+
+```swift
+struct InputSourceIndicatorConfig: Codable {
+    // --- Required field ---
+    var enabled: Bool
+
+    // --- Optional appearance fields (nil = use documented default) ---
+    var fontSize: Double?
+    var fontName: String?
+    var fontWeight: String?          // "regular", "bold", "heavy", "light", "medium", etc.
+    var textColor: String?           // Hex color string, e.g. "#FFFFFF"
+    var opacity: Double?             // 0.0 - 1.0 for text opacity
+    var backgroundColor: String?     // Hex color string for background pill
+    var backgroundOpacity: Double?   // 0.0 - 1.0 for background opacity
+    var backgroundCornerRadius: Double?  // Corner radius in points
+    var verticalOffset: Double?      // Additional pixels below menu bar
+
+    // --- Documented default constants ---
+    // (Exception to no-default-fallback rule: see Issues - Pending Items.md, item 16.
+    //  Follows precedent of moveWindowHotkey item 11 and pinWindowHotkey item 12.)
+    static let defaultFontSize: Double = 60
+    static let defaultFontName: String = "Helvetica Neue"
+    static let defaultFontWeight: String = "bold"
+    static let defaultTextColor: String = "#FFFFFF"
+    static let defaultOpacity: Double = 0.8
+    static let defaultBackgroundColor: String = "#000000"
+    static let defaultBackgroundOpacity: Double = 0.3
+    static let defaultBackgroundCornerRadius: Double = 10
+    static let defaultVerticalOffset: Double = 0
+
+    // --- Resolved computed properties ---
+    var effectiveFontSize: Double { fontSize ?? Self.defaultFontSize }
+    var effectiveFontName: String { fontName ?? Self.defaultFontName }
+    var effectiveFontWeight: String { fontWeight ?? Self.defaultFontWeight }
+    var effectiveTextColor: String { textColor ?? Self.defaultTextColor }
+    var effectiveOpacity: Double { opacity ?? Self.defaultOpacity }
+    var effectiveBackgroundColor: String { backgroundColor ?? Self.defaultBackgroundColor }
+    var effectiveBackgroundOpacity: Double { backgroundOpacity ?? Self.defaultBackgroundOpacity }
+    var effectiveBackgroundCornerRadius: Double { backgroundCornerRadius ?? Self.defaultBackgroundCornerRadius }
+    var effectiveVerticalOffset: Double { verticalOffset ?? Self.defaultVerticalOffset }
+}
+```
+
+**Design rationale:**
+- All appearance properties are `Optional` so that absent JSON keys decode to `nil` rather than causing a decode error. The `effective*` computed properties apply the documented defaults.
+- The `enabled` field is non-optional (`Bool`, not `Bool?`). When present in JSON, it must be true or false. The entire `inputSourceIndicator` section being absent means the feature is disabled (the field on `JumpeeConfig` is `Optional`).
+- The pattern mirrors `OverlayConfig` (rich appearance config) but with optional properties + defaults rather than a `static let defaultConfig`. This is because the input source indicator is an optional feature, while the overlay has always been part of the app.
+
+**Addition to JumpeeConfig (line 140, after `var pinWindowHotkey: HotkeyConfig?`):**
+
+```swift
+var inputSourceIndicator: InputSourceIndicatorConfig?
+```
+
+**Estimated lines:** ~45
+
+#### 2.2 InputSourceIndicatorWindow (NSWindow subclass)
+
+**Location in main.swift:** After `OverlayManager` (line 500), before `// MARK: - Space Navigation` (line 502).
+
+```swift
+// MARK: - Input Source Indicator Window
+
+class InputSourceIndicatorWindow: NSWindow {
+    private let label: NSTextField
+    private let backgroundView: NSView
+    private let horizontalPadding: CGFloat = 20
+    private let verticalPadding: CGFloat = 8
+
+    // --- Initializer ---
+    init(screen: NSScreen, text: String, config: InputSourceIndicatorConfig)
+        // 1. Create label (NSTextField(labelWithString:))
+        // 2. Create backgroundView (NSView with wantsLayer = true)
+        // 3. Calculate text size via label.fittingSize
+        // 4. Calculate window size: textSize + padding
+        // 5. Calculate window position via positionRect(on:config:windowSize:)
+        // 6. Call super.init(contentRect:styleMask:backing:defer:)
+        //    with .borderless, .buffered, defer: false
+        // 7. Configure window properties (see below)
+        // 8. Build view hierarchy: contentView -> backgroundView -> label
+        // 9. Apply styling from config
+
+    // --- Public methods ---
+    func updateText(_ text: String, config: InputSourceIndicatorConfig)
+        // 1. Update label.stringValue
+        // 2. Re-apply font/color/opacity from config (may have changed)
+        // 3. label.sizeToFit()
+        // 4. Recalculate window size
+        // 5. Reposition via positionRect(on:config:windowSize:)
+        // 6. Resize backgroundView to match
+        // 7. Center label in backgroundView
+        // 8. Call setFrame(_:display:) with new rect
+
+    func reposition(on screen: NSScreen, config: InputSourceIndicatorConfig)
+        // 1. Recalculate position for the new screen
+        // 2. Call setFrame(_:display:) with current size but new position
+
+    // --- Private methods ---
+    private func menuBarHeight(for screen: NSScreen) -> CGFloat
+        // Formula: screen.frame.maxY - screen.visibleFrame.maxY
+        // Returns:
+        //   ~25px on standard displays
+        //   ~37px on notched MacBook Pro displays
+        //   0px when menu bar is auto-hidden
+
+    private func positionRect(on screen: NSScreen, config: InputSourceIndicatorConfig,
+                              windowSize: NSSize) -> NSRect
+        // 1. let mbHeight = menuBarHeight(for: screen)
+        // 2. let verticalOffset = CGFloat(config.effectiveVerticalOffset)
+        // 3. let x = screen.frame.origin.x + (screen.frame.width - windowSize.width) / 2
+        // 4. let y = screen.frame.maxY - mbHeight - windowSize.height - verticalOffset
+        // 5. return NSRect(x: x, y: y, width: windowSize.width, height: windowSize.height)
+
+    private func applyStyle(config: InputSourceIndicatorConfig)
+        // 1. Resolve font: NSFont(name:size:) ?? NSFont.systemFont(ofSize:weight:)
+        //    using config.effectiveFontName, config.effectiveFontSize,
+        //    fontWeight(from: config.effectiveFontWeight) [existing utility at line ~198]
+        // 2. Set label.font, label.textColor (fromHex + opacity)
+        // 3. Set backgroundView.layer?.backgroundColor (fromHex + backgroundOpacity)
+        // 4. Set backgroundView.layer?.cornerRadius
+}
+```
+
+**Window properties (set in init):**
+
+| Property | Value | Rationale |
+|----------|-------|-----------|
+| `level` | `NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.floatingWindow)) + 1)` | Above normal windows, below status/menu bar. Same level as existing approach for floating UI. |
+| `backgroundColor` | `.clear` | Window itself is transparent; the pill provides the background. |
+| `isOpaque` | `false` | Required for transparency. |
+| `hasShadow` | `false` | HUD-style indicator should not cast shadow. |
+| `ignoresMouseEvents` | `true` | Fully click-through (NFR-ISI-3). |
+| `collectionBehavior` | `[.canJoinAllSpaces, .stationary]` | Visible on all spaces, does not animate during space transitions. |
+
+**View hierarchy:**
+
+```
+NSWindow
+  └── contentView (NSView, clear background, wantsLayer = true)
+        └── backgroundView (NSView, wantsLayer = true)
+              │  layer.backgroundColor = hex(config.effectiveBackgroundColor)
+              │      .withAlphaComponent(config.effectiveBackgroundOpacity)
+              │  layer.cornerRadius = config.effectiveBackgroundCornerRadius
+              │  frame = (0, 0, textWidth + 2*hPadding, textHeight + 2*vPadding)
+              │
+              └── label (NSTextField)
+                    │  font = resolved from config
+                    │  textColor = hex(config.effectiveTextColor)
+                    │      .withAlphaComponent(config.effectiveOpacity)
+                    │  alignment = .center
+                    │  frame = (hPadding, vPadding, textWidth, textHeight)
+```
+
+**Differences from OverlayWindow:**
+
+| Aspect | OverlayWindow | InputSourceIndicatorWindow |
+|--------|---------------|---------------------------|
+| Size | Full screen frame | Sized to text + padding |
+| Level | `desktopWindow + 1` (below everything) | `floatingWindow + 1` (above normal windows) |
+| Background | None (transparent text on desktop) | Semi-transparent pill/rounded rectangle |
+| Positioning | Configurable via `position` string | Fixed: centered horizontally, below menu bar |
+| Content | Desktop name | Input source name |
+
+**Estimated lines:** ~100
+
+#### 2.3 InputSourceIndicatorManager (class)
+
+**Location in main.swift:** After `InputSourceIndicatorWindow`, before `// MARK: - Space Navigation`.
+
+```swift
+// MARK: - Input Source Indicator Manager
+
+class InputSourceIndicatorManager {
+    // --- Properties ---
+    private var window: InputSourceIndicatorWindow?
+    private var currentDisplayedName: String = ""
+    private let spaceDetector: SpaceDetector
+    private var currentConfig: InputSourceIndicatorConfig?
+    private var isObserving: Bool = false
+
+    // --- Initializer ---
+    init(spaceDetector: SpaceDetector)
+        // Store the space detector reference. No side effects.
+
+    // --- Public methods ---
+
+    func start(config: JumpeeConfig)
+        // 1. Guard config.inputSourceIndicator?.enabled == true; else return
+        // 2. Store config.inputSourceIndicator in currentConfig
+        // 3. Register DistributedNotificationCenter observer (if not already)
+        // 4. Read current input source name via getCurrentInputSourceName()
+        // 5. Store in currentDisplayedName
+        // 6. Determine active screen via spaceDetector
+        // 7. Create InputSourceIndicatorWindow(screen:text:config:)
+        // 8. window?.orderFront(nil)
+        // 9. Set isObserving = true
+
+    func stop()
+        // 1. Remove DistributedNotificationCenter observer
+        // 2. window?.orderOut(nil)
+        // 3. window = nil
+        // 4. currentDisplayedName = ""
+        // 5. currentConfig = nil
+        // 6. isObserving = false
+
+    func updateConfig(_ config: JumpeeConfig)
+        // Three-way transition logic:
+        // Case A: was disabled, now enabled -> call start(config:)
+        // Case B: was enabled, now disabled -> call stop()
+        // Case C: remains enabled -> update currentConfig, re-read input source,
+        //         call window?.updateText(name, config:) to apply style changes,
+        //         call refresh() to reposition
+
+    func refresh()
+        // 1. Guard currentConfig != nil and enabled
+        // 2. Get active screen via spaceDetector.getCurrentSpaceInfo() + displayIDToScreen()
+        // 3. Call window?.reposition(on: targetScreen, config: currentConfig!)
+
+    // --- Private methods ---
+
+    private func getCurrentInputSourceName() -> String
+        // 1. let source = TISCopyCurrentKeyboardInputSource()
+        // 2. Guard let namePtr = TISGetInputSourceProperty(source, kTISPropertyLocalizedName)
+        // 3. let name = Unmanaged<CFString>.fromOpaque(namePtr).takeUnretainedValue() as String
+        // 4. return name
+        // CRITICAL: Use takeUnretainedValue() (Get rule), NOT takeRetainedValue()
+        //           Using takeRetainedValue() causes double-free crash.
+
+    @objc private func inputSourceDidChange(_ notification: Notification)
+        // 1. let newName = getCurrentInputSourceName()
+        // 2. Guard newName != currentDisplayedName (dedup guard)
+        // 3. currentDisplayedName = newName
+        // 4. Guard let config = currentConfig
+        // 5. window?.updateText(newName, config: config)
+}
+```
+
+**Notification registration details:**
+
+```swift
+DistributedNotificationCenter.default().addObserver(
+    self,
+    selector: #selector(inputSourceDidChange(_:)),
+    name: NSNotification.Name("AppleSelectedInputSourcesChangedNotification"),
+    object: nil,
+    suspensionBehavior: .deliverImmediately
+)
+```
+
+**Key design decisions:**
+- **Dedup guard:** The notification may fire multiple times for a single input source switch (e.g., during complex IME transitions). The `guard newName != currentDisplayedName` prevents unnecessary window updates.
+- **`isObserving` flag:** Prevents double-registration if `start()` is called multiple times without `stop()`.
+- **Thread safety:** `DistributedNotificationCenter` delivers notifications on the same thread that registered the observer. Since `start()` is always called from the main thread (via `MenuBarController.init()` or `reloadConfig()`), all notifications arrive on the main thread. All UI updates (`NSWindow`, `NSTextField`) happen on the main thread. No synchronization primitives are needed.
+- **Active screen detection:** Uses `spaceDetector.getCurrentSpaceInfo()` to get the display ID, then `spaceDetector.displayIDToScreen()` to map to `NSScreen`. Falls back to `NSScreen.main` if the display cannot be resolved (defensive: display may have been disconnected between calls).
+
+**Estimated lines:** ~80
+
+### 3. Data Flow Diagrams
+
+#### 3.1 Input Source Change Flow
+
+```
+User switches keyboard input source (any method)
+  |
+  v
+macOS posts "AppleSelectedInputSourcesChangedNotification"
+via DistributedNotificationCenter
+  |
+  v (delivered on main thread, within ~1-5ms)
+InputSourceIndicatorManager.inputSourceDidChange(_:)
+  |
+  +-- getCurrentInputSourceName()
+  |     |-- TISCopyCurrentKeyboardInputSource() -> TISInputSource
+  |     |-- TISGetInputSourceProperty(source, kTISPropertyLocalizedName) -> CFString
+  |     |-- Unmanaged<CFString>.fromOpaque(ptr).takeUnretainedValue() as String
+  |     +-- Returns e.g. "Greek"
+  |
+  +-- Guard: "Greek" != currentDisplayedName ("U.S.")  -> proceed
+  |
+  +-- currentDisplayedName = "Greek"
+  |
+  +-- window?.updateText("Greek", config: currentConfig!)
+        |-- label.stringValue = "Greek"
+        |-- label.font = NSFont(name: "Helvetica Neue", size: 60)
+        |-- label.sizeToFit()
+        |-- Recalculate window size to fit new text
+        |-- positionRect(on: currentScreen, ...) -> new centered rect
+        |-- setFrame(newRect, display: true)
+        |-- Resize backgroundView, re-center label
+        +-- Window visually updates on screen (sub-frame, <16ms)
+
+Total latency: <10ms (notification delivery + TIS API call + view update)
+```
+
+#### 3.2 Space Change Flow
+
+```
+User switches to a different desktop/space
+  |
+  v
+NSWorkspace.activeSpaceDidChangeNotification fires
+  |
+  v
+MenuBarController.spaceDidChange(_:)
+  |
+  +-- updateTitle()          (existing)
+  +-- overlayManager.updateOverlay(config:)  (existing)
+  +-- inputSourceManager?.refresh()          (NEW)
+        |
+        +-- spaceDetector.getCurrentSpaceInfo()
+        |     Returns: (displayID: "37D8832A-...", localPosition: 1, globalPosition: 4)
+        |
+        +-- spaceDetector.displayIDToScreen("37D8832A-...") -> NSScreen
+        |
+        +-- window?.reposition(on: externalScreen, config: currentConfig!)
+              |-- menuBarHeight(for: externalScreen) -> 25 (external) or 37 (notched)
+              |-- positionRect(...) -> new centered rect on correct screen
+              +-- setFrame(newRect, display: true)
+```
+
+#### 3.3 Config Reload Flow
+
+```
+User presses Cmd+R (Reload Config)
+  |
+  v
+MenuBarController.reloadConfig(_:)
+  |
+  +-- config = JumpeeConfig.load()    (existing)
+  +-- updateTitle()                   (existing)
+  +-- overlayManager.updateOverlay()  (existing)
+  +-- reRegisterHotkeys()             (existing)
+  |
+  +-- (NEW) Input source indicator handling:
+        |
+        +-- Case: config.inputSourceIndicator?.enabled == true
+        |     |
+        |     +-- if inputSourceManager == nil:
+        |     |     inputSourceManager = InputSourceIndicatorManager(spaceDetector:)
+        |     |
+        |     +-- inputSourceManager?.updateConfig(config)
+        |           |
+        |           +-- Case A (was off, now on): start(config:)
+        |           +-- Case B (was on, now off): stop()
+        |           +-- Case C (still on): update currentConfig, re-read input source,
+        |                                   apply new style, reposition
+        |
+        +-- Case: config.inputSourceIndicator?.enabled != true
+              |
+              +-- inputSourceManager?.stop()
+```
+
+#### 3.4 Application Lifecycle Flow
+
+```
+App Launch (MenuBarController.init())
+  |
+  +-- config = JumpeeConfig.load()
+  +-- overlayManager = OverlayManager(spaceDetector:)
+  +-- setupMenu()    // includes tag 102 toggle item
+  +-- updateTitle()
+  +-- registerForSpaceChanges()
+  +-- reRegisterHotkeys()
+  |
+  +-- (NEW) if config.inputSourceIndicator?.enabled == true:
+  |     inputSourceManager = InputSourceIndicatorManager(spaceDetector:)
+  |     inputSourceManager?.start(config: config)
+  |       |-- Register DistributedNotificationCenter observer
+  |       |-- Read current input source -> create window -> show
+  |
+  +-- DispatchQueue.main.asyncAfter(0.5): overlayManager.updateOverlay()
+
+                    ...app runs...
+
+App Quit (MenuBarController.quit(_:))
+  |
+  +-- inputSourceManager?.stop()     (NEW)
+  |     |-- Remove notification observer
+  |     |-- orderOut + nil the window
+  |
+  +-- WindowPinner.unpinAll()        (existing)
+  +-- hotkeyManager?.unregister()    (existing)
+  +-- overlayManager.removeAllOverlays()  (existing)
+  +-- NSApp.terminate(nil)
+```
+
+### 4. Window Positioning Algorithm
+
+#### 4.1 Menu Bar Height Calculation (Notch-Aware)
+
+```swift
+private func menuBarHeight(for screen: NSScreen) -> CGFloat {
+    return screen.frame.maxY - screen.visibleFrame.maxY
+}
+```
+
+**How this works with macOS coordinate system:**
+- macOS uses a bottom-left origin global coordinate system.
+- `screen.frame` is the full screen rectangle including the menu bar area.
+- `screen.visibleFrame` is the usable area excluding the menu bar and Dock.
+- `screen.frame.maxY` = top of the physical screen.
+- `screen.visibleFrame.maxY` = top of the usable area (bottom of the menu bar).
+- The difference is the menu bar height.
+
+**Results by display type:**
+
+| Display Type | screen.frame.height | screen.visibleFrame.maxY offset | menuBarHeight Result |
+|-------------|--------------------|---------------------------------|---------------------|
+| Standard external display | 1080 | ~1055 | ~25px |
+| MacBook Pro with notch | 1117 | ~1080 | ~37px |
+| Auto-hide menu bar (hidden) | 1080 | ~1080 | ~0px |
+| Auto-hide menu bar (visible) | 1080 | ~1055 | ~25px |
+
+**Important:** The Dock position does NOT affect this formula because we use `maxY` (top of screen), not `minY` (bottom). The Dock only affects `visibleFrame.origin.y` (the bottom), not `visibleFrame.maxY` (the top).
+
+#### 4.2 Complete Positioning Calculation
+
+```swift
+private func positionRect(on screen: NSScreen, config: InputSourceIndicatorConfig,
+                          windowSize: NSSize) -> NSRect {
+    let mbHeight = menuBarHeight(for: screen)
+    let verticalOffset = CGFloat(config.effectiveVerticalOffset)
+
+    // Horizontal: centered on the screen
+    let x = screen.frame.origin.x + (screen.frame.width - windowSize.width) / 2
+
+    // Vertical: top edge of window touches bottom of menu bar (+ optional offset)
+    // In macOS coordinates (bottom-left origin):
+    //   screen.frame.maxY = top of screen
+    //   screen.frame.maxY - mbHeight = bottom edge of menu bar
+    //   Subtract windowSize.height to get the bottom edge of our window
+    //   Subtract verticalOffset for additional user-configured spacing
+    let y = screen.frame.maxY - mbHeight - windowSize.height - verticalOffset
+
+    return NSRect(x: x, y: y, width: windowSize.width, height: windowSize.height)
+}
+```
+
+**Visual representation (macOS coordinate system, Y increases upward):**
+
+```
+                    screen.frame.maxY
+  +==========================================+  <- top of physical screen
+  |            MENU BAR (25-37px)            |
+  |==========================================|  <- screen.frame.maxY - mbHeight
+  |  +-[  Greek  ]--+  <- indicator window   |  <- y + windowHeight
+  |  +---------------+                       |  <- y (bottom of indicator)
+  |                                          |
+  |           (desktop content)              |
+  |                                          |
+  +==========================================+  <- screen.frame.origin.y
+```
+
+#### 4.3 Window Size Calculation
+
+```swift
+// Text measurement
+label.stringValue = text
+label.sizeToFit()
+let textSize = label.fittingSize
+
+// Window size = text + padding for the background pill
+let windowWidth = textSize.width + horizontalPadding * 2   // 20pt * 2 = 40pt total
+let windowHeight = textSize.height + verticalPadding * 2   // 8pt * 2 = 16pt total
+let windowSize = NSSize(width: windowWidth, height: windowHeight)
+```
+
+**Example sizes at 60pt bold "Helvetica Neue":**
+
+| Input Source Name | Approximate Text Width | Window Width | Window Height |
+|-------------------|----------------------|--------------|--------------|
+| "U.S." | ~100px | ~140px | ~88px |
+| "Greek" | ~150px | ~190px | ~88px |
+| "British" | ~185px | ~225px | ~88px |
+| "Pinyin - Simplified" | ~460px | ~500px | ~88px |
+
+All sizes are well within typical screen widths (1440px minimum).
+
+### 5. Configuration Schema
+
+#### 5.1 JSON Schema
+
+```json
+{
+  "inputSourceIndicator": {
+    "enabled": true,
+    "fontSize": 60,
+    "fontName": "Helvetica Neue",
+    "fontWeight": "bold",
+    "textColor": "#FFFFFF",
+    "opacity": 0.8,
+    "backgroundColor": "#000000",
+    "backgroundOpacity": 0.3,
+    "backgroundCornerRadius": 10,
+    "verticalOffset": 0
+  }
+}
+```
+
+#### 5.2 Property Reference
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `enabled` | `Bool` | Yes | N/A (section absent = disabled) | Master switch for the feature |
+| `fontSize` | `Double` | No | `60` | Font size in points |
+| `fontName` | `String` | No | `"Helvetica Neue"` | Font family name |
+| `fontWeight` | `String` | No | `"bold"` | Font weight: "regular", "bold", "heavy", "light", "medium", "semibold", "ultraLight", "thin", "black" |
+| `textColor` | `String` | No | `"#FFFFFF"` | Hex color code for text |
+| `opacity` | `Double` | No | `0.8` | Text opacity (0.0 transparent to 1.0 opaque) |
+| `backgroundColor` | `String` | No | `"#000000"` | Hex color code for background pill |
+| `backgroundOpacity` | `Double` | No | `0.3` | Background pill opacity (0.0 = invisible, 1.0 = solid) |
+| `backgroundCornerRadius` | `Double` | No | `10` | Corner radius for background pill (0 = square) |
+| `verticalOffset` | `Double` | No | `0` | Additional pixels below the menu bar |
+
+#### 5.3 Config Behavior Matrix
+
+| Scenario | Behavior |
+|----------|----------|
+| `inputSourceIndicator` absent from config | Feature disabled. No monitoring, no window, no resources. |
+| `inputSourceIndicator.enabled: false` | Feature disabled. Same as absent. |
+| `inputSourceIndicator.enabled: true`, all appearance absent | Feature enabled with all defaults: 60pt white bold Helvetica Neue on dark semi-transparent pill. |
+| `inputSourceIndicator.enabled: true`, partial appearance | Feature enabled. Specified properties used, unspecified use defaults. |
+| `inputSourceIndicator.enabled: true`, full appearance | Feature enabled. All custom values used. |
+
+#### 5.4 Minimal Enable Config
+
+```json
+{
+  "inputSourceIndicator": {
+    "enabled": true
+  }
+}
+```
+
+#### 5.5 Full Custom Config
+
+```json
+{
+  "inputSourceIndicator": {
+    "enabled": true,
+    "fontSize": 48,
+    "fontName": "SF Pro Display",
+    "fontWeight": "semibold",
+    "textColor": "#00FF00",
+    "opacity": 0.9,
+    "backgroundColor": "#333333",
+    "backgroundOpacity": 0.5,
+    "backgroundCornerRadius": 16,
+    "verticalOffset": 10
+  }
+}
+```
+
+### 6. MenuBarController Integration Points
+
+All modifications are within `class MenuBarController` in `Sources/main.swift`.
+
+#### 6.1 New Instance Variable (after line 1142)
+
+```swift
+private var inputSourceManager: InputSourceIndicatorManager?
+```
+
+#### 6.2 Initialization (after line 1161, in init())
+
+Insert after the overlay `asyncAfter` block:
+
+```swift
+if config.inputSourceIndicator?.enabled == true {
+    inputSourceManager = InputSourceIndicatorManager(spaceDetector: spaceDetector)
+    inputSourceManager?.start(config: config)
+}
+```
+
+#### 6.3 Menu Toggle Item (in setupMenu(), after tag 101 overlay item, ~line 1288)
+
+```swift
+let isiTitle = config.inputSourceIndicator?.enabled == true
+    ? "Disable Input Source Indicator"
+    : "Enable Input Source Indicator"
+let isiToggleItem = NSMenuItem(
+    title: isiTitle,
+    action: #selector(toggleInputSourceIndicator(_:)),
+    keyEquivalent: ""
+)
+isiToggleItem.target = self
+isiToggleItem.tag = 102
+menu.addItem(isiToggleItem)
+```
+
+**Tag assignment:** `102` (next available after 100=space number toggle, 101=overlay toggle). The pin hotkey item uses tag 302, so 102 is free and follows the toggle group convention (100, 101, 102 for toggles vs 300+ for hotkey items).
+
+#### 6.4 Toggle Action Method (new @objc method)
+
+```swift
+@objc private func toggleInputSourceIndicator(_ sender: NSMenuItem) {
+    if config.inputSourceIndicator == nil {
+        config.inputSourceIndicator = InputSourceIndicatorConfig(enabled: true)
+    } else {
+        config.inputSourceIndicator!.enabled.toggle()
+    }
+    config.save()
+
+    if config.inputSourceIndicator?.enabled == true {
+        if inputSourceManager == nil {
+            inputSourceManager = InputSourceIndicatorManager(spaceDetector: spaceDetector)
+        }
+        inputSourceManager?.start(config: config)
+    } else {
+        inputSourceManager?.stop()
+    }
+}
+```
+
+#### 6.5 Menu Title Update (in rebuildSpaceItems(), after tag 101 update, ~line 1558)
+
+```swift
+if let item = menu.item(withTag: 103) {
+    item.title = config.inputSourceIndicator?.enabled == true
+        ? "Disable Input Source Indicator"
+        : "Enable Input Source Indicator"
+}
+```
+
+#### 6.6 Space Change Handler (in spaceDidChange(_:), line 1598)
+
+Add after `overlayManager.updateOverlay(config: config)`:
+
+```swift
+inputSourceManager?.refresh()
+```
+
+#### 6.7 Screen Change Handler (in screenParametersDidChange(_:), line 1603)
+
+Add after `overlayManager.updateOverlay(config: config)`:
+
+```swift
+inputSourceManager?.refresh()
+```
+
+#### 6.8 Config Reload (in reloadConfig(_:), after line 2013)
+
+Add after `reRegisterHotkeys()`:
+
+```swift
+if config.inputSourceIndicator?.enabled == true {
+    if inputSourceManager == nil {
+        inputSourceManager = InputSourceIndicatorManager(spaceDetector: spaceDetector)
+    }
+    inputSourceManager?.updateConfig(config)
+} else {
+    inputSourceManager?.stop()
+}
+```
+
+#### 6.9 Quit Handler (in quit(_:), before line 2017)
+
+Add before `WindowPinner.unpinAll()`:
+
+```swift
+inputSourceManager?.stop()
+```
+
+### 7. Menu Layout After v1.5.0
+
+```
+About Jumpee...
+Jumpee (bold header, disabled)
+---
+Desktops:
+  [display header, if multi-display]
+  [dynamic space items with Cmd+1-9]
+  Rename Current Desktop...         Cmd+N        tag=200
+  Move Window To... >               [submenu]    (if moveWindow.enabled)
+  Pin Window on Top                              tag=400  (if pinWindow.enabled)
+  Unpin All Windows                              tag=401  (if pinned count > 0)
+  Set Up Window Moving...                        (if shortcuts not enabled)
+---
+Hide Space Number                                tag=100
+Disable Overlay                                  tag=101
+Disable Input Source Indicator                   tag=102  (NEW)
+---
+Hotkeys:                            (disabled)
+  Dropdown Hotkey: Cmd+J...                      tag=300
+  Move Window Hotkey: Cmd+M...                   tag=301 (if moveWindow.enabled)
+  Pin Window Hotkey: Ctrl+Cmd+P...               tag=302 (if pinWindow.enabled)
+---
+Open Config File...                 Cmd+,
+Reload Config                       Cmd+R
+---
+Quit Jumpee                         Cmd+Q
+```
+
+### 8. Error Handling Strategy
+
+| Error Scenario | Handling | Rationale |
+|----------------|----------|-----------|
+| `TISCopyCurrentKeyboardInputSource()` returns nil properties | `getCurrentInputSourceName()` returns `"Unknown"` | Defensive fallback; should never happen on a properly configured macOS system |
+| `TISGetInputSourceProperty()` returns nil for `kTISPropertyLocalizedName` | Same as above: return `"Unknown"` | Same rationale |
+| `DistributedNotificationCenter` observer not firing | No explicit handling; indicator shows last known name | Notification is system-managed; failure would indicate a macOS-level issue |
+| `spaceDetector.getCurrentSpaceInfo()` returns nil | `refresh()` returns early without repositioning | Same defensive pattern as `OverlayManager.updateOverlay()` |
+| `spaceDetector.displayIDToScreen()` returns nil | Fall back to `NSScreen.main` | Display may have been disconnected between calls |
+| `NSFont(name:size:)` returns nil (font not installed) | Fall back to `NSFont.systemFont(ofSize:weight:)` | Same pattern as `OverlayWindow` (line 380-381) |
+| Config JSON malformed for `inputSourceIndicator` section | `JumpeeConfig.load()` returns default config; `inputSourceIndicator` is nil; feature disabled | Existing config error handling (line 158-168) |
+
+### 9. Thread Safety Considerations
+
+| Concern | Analysis | Conclusion |
+|---------|----------|------------|
+| `DistributedNotificationCenter` delivery thread | Delivers on the thread that registered the observer. Registration happens in `start()`, called from `MenuBarController.init()` or `reloadConfig()` -- both on main thread. | All notifications arrive on main thread. Safe. |
+| `TISCopyCurrentKeyboardInputSource()` thread safety | The TIS APIs are designed to be called from any thread, but the returned `TISInputSource` is a Core Foundation object. Reading properties via `TISGetInputSourceProperty()` is thread-safe. | Called only from main thread (in notification handler). Safe. |
+| `NSWindow` / `NSTextField` updates | All AppKit UI must be updated on the main thread. | All updates are in `inputSourceDidChange(_:)` which runs on main thread. Safe. |
+| `inputSourceManager` property access | Accessed only from `MenuBarController` methods which are all main-thread (init, menu actions, notification handlers). | Single-threaded access. No synchronization needed. |
+| `currentDisplayedName` property | Read/written only in `inputSourceDidChange(_:)` (main thread) and `start()`/`stop()` (main thread). | Single-threaded access. Safe. |
+
+**Conclusion:** No concurrency primitives (locks, queues, actors) are needed. The entire feature operates on the main thread.
+
+### 10. Coexistence with Existing Features
+
+| Feature | Interaction | Details |
+|---------|-------------|---------|
+| Desktop watermark overlay | Independent. Zero interference. | Different windows: OverlayWindow at `desktopWindow + 1` (below everything) vs InputSourceIndicatorWindow at `floatingWindow + 1` (above normal windows). Different positions: watermark uses configurable position within full screen; indicator is centered below menu bar. Different triggers: watermark updates on space change; indicator updates on input source change. |
+| Menu bar title | No interaction. | Menu bar shows space name; indicator shows input source name. |
+| Global hotkeys | No new hotkey. | No new `HotkeySlot` case. No changes to `GlobalHotkeyManager`. |
+| Pin window on top | Independent. | Pin overlay and indicator are at the same window level (`floatingWindow + 1` and `floatingWindow` respectively) but different positions. Pinned windows use `kCGFloatingWindowLevel` (3); indicator uses `floatingWindow + 1` which is higher. |
+| Space change detection | Shared trigger. | Both overlay and indicator refresh on space change. The indicator only repositions (no text change); the overlay updates both text and position. |
+| Config reload | Shared trigger. | Both overlay and indicator re-read their respective config sections on Cmd+R. |
+| Move window | No interaction. | Moving windows does not affect input source or indicator. |
+
+### 11. Insertion Point Summary
+
+This table summarizes where each change goes in `Sources/main.swift`, referenced by line numbers from the current codebase (2049 lines total).
+
+| Change | After Line | Before Line | Description | Est. Lines |
+|--------|-----------|-------------|-------------|------------|
+| `InputSourceIndicatorConfig` struct | 130 (PinWindowConfig) | 132 (JumpeeConfig) | New Codable struct with 10 props + defaults + computed | ~45 |
+| `inputSourceIndicator` field on JumpeeConfig | 140 (pinWindowHotkey) | 142 (effectiveMoveWindowHotkey) | New optional property | 1 |
+| `InputSourceIndicatorWindow` class | 500 (OverlayManager end) | 502 (Space Navigation) | New NSWindow subclass | ~100 |
+| `InputSourceIndicatorManager` class | After new window class | 502 (Space Navigation) | Manager with notification observer + TIS APIs | ~80 |
+| `inputSourceManager` instance var | 1142 (hotkeyManager) | 1144 (init) | Optional property on MenuBarController | 1 |
+| Manager init in `init()` | 1161 (overlay asyncAfter) | -- | Create & start manager if enabled | ~4 |
+| Toggle menu item in `setupMenu()` | 1288 (overlay toggle) | 1290 (separator) | Tag 102 menu item | ~10 |
+| `toggleInputSourceIndicator` action | Near 1648 (unpinAllWindows) | -- | New @objc method | ~15 |
+| Title update in `rebuildSpaceItems()` | 1558 (tag 101 update) | 1560 (hotkey updates) | Tag 102 title update | ~4 |
+| `refresh()` in `spaceDidChange` | 1598 (overlay update) | -- | One-liner | 1 |
+| `refresh()` in `screenParametersDidChange` | 1603 (overlay update) | -- | One-liner | 1 |
+| Config reload handling | 2013 (reRegisterHotkeys) | -- | Start/stop/reconfigure | ~6 |
+| `stop()` in `quit()` | 2016 (before WindowPinner) | 2017 (unpinAll) | One-liner | 1 |
+
+**Total estimated new lines:** ~270 (bringing main.swift from ~2049 to ~2319)
+
+### 12. About Dialog Update
+
+**Location:** Inside `showAboutDialog()` (line 1759), add after the "Pin Window on Top" section:
+
+```
+5. Input Source Indicator (optional)
+   Shows the active keyboard input source below
+   the menu bar. Set "inputSourceIndicator":
+   {"enabled": true} in your config file.
+   No additional permissions required.
+```
+
+### 13. Risks and Mitigations
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Input source changes during full-screen apps -- indicator covers content | Low | User can disable via config. Future: detect full-screen via `NSApplication.didChangeOcclusionState` |
+| Auto-hide menu bar -- indicator sits at screen top when menu bar hidden | Low | `menuBarHeight()` returns 0; indicator is at very top. Acceptable for v1. |
+| Duplicate notifications from `DistributedNotificationCenter` | Very Low | Dedup guard: skip update if name matches `currentDisplayedName` |
+| Long input source names widen indicator past screen edge | Very Low | At 60pt, even "Pinyin - Simplified" (~500px) fits on 1440px+ screens. User can reduce `fontSize`. |
+| `TISCopyCurrentKeyboardInputSource` returns nil | Very Low | Return "Unknown" string. Should never happen on a real macOS system. |
+| File grows to ~2319 lines | Low | Acceptable per single-file architecture. No refactoring planned. |
+| `AppleSelectedInputSourcesChangedNotification` stops being posted in future macOS | Very Low | This notification has been stable since macOS 10.5 (2007). Used by major third-party apps. |
+| Memory leak from `TISCopyCurrentKeyboardInputSource` | Very Low | Swift ARC handles Core Foundation objects bridged via `Unmanaged`. The `takeUnretainedValue()` for the property pointer is correct per the "Get" naming convention. |

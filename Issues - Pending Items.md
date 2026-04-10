@@ -32,6 +32,8 @@
 
 15. **Jumpee - Design doc menu layout inconsistency**: The technical design doc (v1.3.0, section 7.1) shows "About Jumpee..." appearing before the "Jumpee" header, but section 6.1 of the same document and the refined request both specify it should appear after the header. The implementation correctly follows the detailed instruction (after the header). The section 7.1 diagram should be updated to match.
 
+16. **Jumpee - Config default exception for InputSourceIndicatorConfig appearance properties**: The `InputSourceIndicatorConfig` struct uses documented default values for appearance properties (fontSize: 60, fontName: "Helvetica Neue", fontWeight: "bold", textColor: "#FFFFFF", opacity: 0.8, backgroundColor: "#000000", backgroundOpacity: 0.3, backgroundCornerRadius: 10, verticalOffset: 0) when the corresponding JSON keys are absent. This is a documented exception to the project's "no default fallback for config settings" rule, following the same pattern as `moveWindowHotkey` (item 11) and `pinWindowHotkey` (item 12). The defaults are centralized in static constants on `InputSourceIndicatorConfig` and exposed via `effective*` computed properties.
+
 ## Completed
 
 1. **Jumpee - Global hotkey**: Implemented configurable global hotkey (default Cmd+J) using Carbon RegisterEventHotKey API.
@@ -49,3 +51,5 @@
 7. **Jumpee - Multi-display workspace support**: Added per-display workspace lists, per-display numbering, display headers in menu, overlay on correct screen, and display connect/disconnect handling. No config format changes needed.
 
 8. **Jumpee - v1.3.0 compiler warnings fixed**: Changed `var dropdownID` and `var moveWindowID` to `let` in `GlobalHotkeyManager.register()` since `RegisterEventHotKey` takes `EventHotKeyID` by value, not by mutable reference. Fixed during code review.
+
+9. **Jumpee - v1.5.0 design doc tag 103 corrected to 102**: The project-design.md document incorrectly specified tag 103 for the Input Source Indicator menu toggle item. The implementation correctly uses tag 102 (the next available tag in the toggle group after 100 and 101). The design doc's reasoning was based on an incorrect assumption that tag 102 was used by the pin hotkey (the pin hotkey actually uses tag 302). Fixed during v1.5.0 code review.

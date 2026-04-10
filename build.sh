@@ -36,9 +36,9 @@ cat > "$CONTENTS_DIR/Info.plist" << 'PLIST'
     <key>CFBundleIdentifier</key>
     <string>com.local.jumpee</string>
     <key>CFBundleVersion</key>
-    <string>1.4.0</string>
+    <string>1.5.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.4.0</string>
+    <string>1.5.0</string>
     <key>CFBundleExecutable</key>
     <string>Jumpee</string>
     <key>CFBundlePackageType</key>

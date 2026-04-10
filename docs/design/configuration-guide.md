@@ -220,6 +220,56 @@ Same supported key and modifier values as the `hotkey` property above.
 - **How to change**: Click "Pin Window Hotkey: ..." in the Hotkeys section of the menu, or edit the config file and reload (Cmd+R).
 - **Behavior**: Press once to pin the focused window on top. Press again (while the same window is focused) to unpin it. Use "Unpin All Windows" in the menu to release all pinned windows at once.
 
+### `inputSourceIndicator` (object, optional)
+
+Controls the input source (keyboard language) indicator overlay displayed below the menu bar. When enabled, shows the current keyboard input source name (e.g., "U.S.", "Greek", "British") in large text, updating in real time when the user switches input sources.
+
+| Property | Type | Description | Default |
+|----------|------|-------------|---------|
+| `enabled` | boolean | Master switch for the feature | Feature disabled when absent |
+| `fontSize` | number | Font size in points | `60` |
+| `fontName` | string | Font family name | `"Helvetica Neue"` |
+| `fontWeight` | string | Font weight (same values as overlay) | `"bold"` |
+| `textColor` | string | Hex color code for text | `"#FFFFFF"` |
+| `opacity` | number | Text opacity (0.0 transparent to 1.0 opaque) | `0.8` |
+| `backgroundColor` | string | Hex color code for background pill | `"#000000"` |
+| `backgroundOpacity` | number | Background pill opacity (0.0 = invisible, 1.0 = solid) | `0.3` |
+| `backgroundCornerRadius` | number | Corner radius for background pill (0 = square) | `10` |
+| `verticalOffset` | number | Additional pixels below the menu bar | `0` |
+
+- **How to enable**: Add `"inputSourceIndicator": { "enabled": true }` to your config file, then reload (Cmd+R).
+- **How to toggle**: Click "Enable Input Source Indicator" / "Disable Input Source Indicator" in the menu.
+- **No additional permissions required**: The TIS (Text Input Source Services) APIs do not require Accessibility, Screen Recording, or any special permissions.
+- **Coexistence**: Works independently alongside the desktop watermark overlay. Both can be enabled simultaneously.
+- **Note**: These default values are a documented exception to the no-default-fallback rule (see Issues - Pending Items.md, item 16).
+
+**Minimal enable example**:
+```json
+{
+  "inputSourceIndicator": {
+    "enabled": true
+  }
+}
+```
+
+**Full custom example**:
+```json
+{
+  "inputSourceIndicator": {
+    "enabled": true,
+    "fontSize": 48,
+    "fontName": "SF Pro Display",
+    "fontWeight": "semibold",
+    "textColor": "#00FF00",
+    "opacity": 0.9,
+    "backgroundColor": "#333333",
+    "backgroundOpacity": 0.5,
+    "backgroundCornerRadius": 16,
+    "verticalOffset": 10
+  }
+}
+```
+
 ### Complete Configuration Example (with all features)
 
 ```json
@@ -241,6 +291,18 @@ Same supported key and modifier values as the `hotkey` property above.
   "pinWindowHotkey": {
     "key": "p",
     "modifiers": ["control", "command"]
+  },
+  "inputSourceIndicator": {
+    "enabled": true,
+    "fontSize": 60,
+    "fontName": "Helvetica Neue",
+    "fontWeight": "bold",
+    "textColor": "#FFFFFF",
+    "opacity": 0.8,
+    "backgroundColor": "#000000",
+    "backgroundOpacity": 0.3,
+    "backgroundCornerRadius": 10,
+    "verticalOffset": 0
   },
   "overlay": {
     "enabled": true,
@@ -281,3 +343,6 @@ Same supported key and modifier values as the `hotkey` property above.
 | Enable pin window | Add `"pinWindow": {"enabled": true}` to config, then Cmd+R |
 | Change overlay style | Edit config file, then Cmd+R to reload |
 | Change font weight | Edit config file, then Cmd+R to reload |
+| Enable input source indicator | Add `"inputSourceIndicator": {"enabled": true}` to config, then Cmd+R |
+| Toggle input source indicator | Use menu toggle — saves automatically |
+| Change indicator style | Edit config file, then Cmd+R to reload |

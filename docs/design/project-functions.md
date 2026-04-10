@@ -1,6 +1,6 @@
 # Jumpee - Functional Requirements
 
-**Last updated:** 2026-04-10 (v1.4.0 pin-window-on-top proposed)
+**Last updated:** 2026-04-10 (v1.5.0 input-source-indicator proposed)
 
 ---
 
@@ -203,3 +203,57 @@ A "Pin Window Hotkey: Ctrl+Cmd+P..." entry appears in the Hotkeys section of the
 
 ### FR-44: Pin Cleanup on Quit
 When Jumpee quits (Cmd+Q), all pinned windows are restored to normal z-order (`kCGNormalWindowLevel`) before the application terminates. This ensures no windows are left permanently floating after Jumpee exits.
+
+---
+
+## 9. Input Source Indicator (Proposed - plan-007)
+
+### FR-45: Monitor Active Input Source
+Jumpee monitors the currently active macOS keyboard input source using the `TISCopyCurrentKeyboardInputSource()` API from `Carbon.HIToolbox` (already imported). The app listens for input source change notifications (`AppleSelectedInputSourcesChangedNotification` via `DistributedNotificationCenter`) to detect changes in real time. No polling is used.
+
+### FR-46: Display Input Source Indicator
+When the feature is enabled, Jumpee displays a transparent overlay window positioned directly below the macOS menu bar, showing the localized name of the current input source (e.g., "U.S.", "Greek", "British") in large text (default 60pt). The overlay:
+- Is horizontally centered on the active display
+- Is vertically positioned immediately below the menu bar (notch-aware via `screen.frame` / `screen.visibleFrame`)
+- Uses a borderless, click-through window (`ignoresMouseEvents = true`)
+- Floats above normal windows at `floatingWindow + 1` level
+- Joins all spaces (`.canJoinAllSpaces`, `.stationary`)
+- Has a semi-transparent background pill/rectangle for contrast
+
+### FR-47: Real-Time Input Source Updates
+The indicator text updates immediately (within one event loop cycle) whenever the user switches the keyboard input source via any method: menu bar, keyboard shortcut, Touch Bar, or programmatic switch. Duplicate notifications (same source name) are silently ignored.
+
+### FR-48: Input Source Name Resolution
+The displayed text is the localized name of the input source, obtained from `TISGetInputSourceProperty(source, kTISPropertyLocalizedName)`. Examples: "U.S.", "Greek", "British", "Pinyin - Simplified".
+
+### FR-49: Coexistence with Desktop Overlay
+The input source indicator is independent of the existing desktop name watermark overlay. Both features can be enabled simultaneously without interference. They use separate overlay windows at different positions and window levels (`desktopWindow + 1` for the watermark vs `floatingWindow + 1` for the indicator).
+
+### FR-50: Space Change Handling
+When the user switches to a different desktop/space, the input source indicator repositions itself to the active display. The indicator continues showing the current input source regardless of which space is active.
+
+### FR-51: Multi-Display Support
+On multi-display setups, the input source indicator appears on the display that contains the active space, using the existing `SpaceDetector.getActiveDisplayID()` and `displayIDToScreen()` infrastructure. The menu bar height is calculated per-screen to handle displays with different heights (e.g., notched MacBook vs external monitor).
+
+### FR-52: Feature Enable/Disable via Config
+An `inputSourceIndicator` configuration section in `~/.Jumpee/config.json` controls whether the feature is active:
+```json
+{
+  "inputSourceIndicator": {
+    "enabled": true
+  }
+}
+```
+When `enabled` is `false` or the section is absent, the input source indicator is not shown and no input source monitoring is performed.
+
+### FR-53: Configurable Appearance
+The `inputSourceIndicator` section supports optional appearance customization: `fontSize` (default 60), `fontName` (default "Helvetica Neue"), `fontWeight` (default "bold"), `textColor` (default "#FFFFFF"), `opacity` (default 0.8), `backgroundColor` (default "#000000"), `backgroundOpacity` (default 0.3), `backgroundCornerRadius` (default 10), and `verticalOffset` (default 0). These defaults are a documented exception to the no-default-fallback rule (see Issues - Pending Items.md, item 16).
+
+### FR-54: Menu Toggle
+A menu item in the Jumpee dropdown (tag 102) allows toggling the input source indicator on/off. When enabled, the item reads "Disable Input Source Indicator"; when disabled, "Enable Input Source Indicator". This follows the same pattern as the overlay toggle (tag 101).
+
+### FR-55: Config Reload Support
+When the user reloads config (Cmd+R or "Reload Config" menu item), the input source indicator respects the updated configuration: enabling, disabling, or restyling as needed. No app restart is required.
+
+### FR-56: No Additional Permissions
+Monitoring the keyboard input source does not require Accessibility, Screen Recording, or any special macOS permissions beyond what Jumpee already needs. The TIS APIs are available without entitlements.
