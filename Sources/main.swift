@@ -526,8 +526,8 @@ class WindowMover {
         guard index >= 1 && index <= 16 else { return }
 
         // 1. Get the "Switch to Desktop N" hotkey from the OS
-        //    Symbolic hotkey IDs: Desktop 1 = 119, Desktop 2 = 120, ..., Desktop N = 118 + N
-        let symbolicHotKey: CGSSymbolicHotKey = UInt32(118 + index)
+        //    Symbolic hotkey IDs: Desktop 1 = 118, Desktop 2 = 119, ..., Desktop N = 117 + N
+        let symbolicHotKey: CGSSymbolicHotKey = UInt32(117 + index)
         var keyCode: CGKeyCode = 0
         var modifierFlags: CGEventFlags = []
 
@@ -634,7 +634,8 @@ class WindowMover {
     /// Check whether "Switch to Desktop 1" shortcut is enabled.
     /// This is the same shortcut Jumpee already requires for navigation.
     static func areSystemShortcutsEnabled() -> Bool {
-        return CGSIsSymbolicHotKeyEnabled(119)
+        // Symbolic hotkey 118 = "Switch to Desktop 1"
+        return CGSIsSymbolicHotKeyEnabled(118)
     }
 }
 
