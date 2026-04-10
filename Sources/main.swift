@@ -88,11 +88,18 @@ struct HotkeyConfig: Codable {
     }
 }
 
+struct MoveWindowConfig: Codable {
+    /// Whether the move-window feature is enabled.
+    /// When false, the "Move Window To..." submenu is hidden.
+    var enabled: Bool
+}
+
 struct JumpeeConfig: Codable {
     var spaces: [String: String]
     var showSpaceNumber: Bool
     var overlay: OverlayConfig
     var hotkey: HotkeyConfig
+    var moveWindow: MoveWindowConfig?
 
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".Jumpee")
@@ -467,7 +474,7 @@ class SpaceNavigator {
         }
     }
 
-    private static func keyCodeForNumber(_ n: Int) -> Int {
+    static func keyCodeForNumber(_ n: Int) -> Int {
         switch n {
         case 1: return 18
         case 2: return 19
@@ -480,6 +487,64 @@ class SpaceNavigator {
         case 9: return 25
         default: return 18
         }
+    }
+}
+
+// MARK: - Window Mover
+
+class WindowMover {
+
+    /// Move the focused window to the given desktop by synthesizing the macOS
+    /// "Move window to Desktop N" system shortcut (Ctrl+Shift+N).
+    ///
+    /// Requires the user to have enabled "Move window to Desktop N" shortcuts
+    /// in System Settings > Keyboard > Keyboard Shortcuts > Mission Control.
+    ///
+    /// - Parameter index: 1-based global desktop position (1 through 9).
+    ///   Matches the global numbering used by SpaceNavigator.navigateToSpace(index:).
+    static func moveToSpace(index: Int) {
+        guard index >= 1 && index <= 9 else { return }
+        let keyCode = SpaceNavigator.keyCodeForNumber(index)
+        let source = CGEventSource(stateID: .hidSystemState)
+
+        if let keyDown = CGEvent(keyboardEventSource: source,
+                                 virtualKey: CGKeyCode(keyCode), keyDown: true) {
+            keyDown.flags = [.maskControl, .maskShift]
+            keyDown.post(tap: .cghidEventTap)
+        }
+        if let keyUp = CGEvent(keyboardEventSource: source,
+                                virtualKey: CGKeyCode(keyCode), keyDown: false) {
+            keyUp.flags = [.maskControl, .maskShift]
+            keyUp.post(tap: .cghidEventTap)
+        }
+    }
+
+    /// Check whether the macOS "Move window to Desktop N" system shortcuts
+    /// appear to be enabled by reading com.apple.symbolichotkeys.plist.
+    ///
+    /// Checks plist key 52 ("Move window to Desktop 1") as a representative
+    /// shortcut. If this key is enabled, we assume all move-window shortcuts
+    /// are configured.
+    ///
+    /// - Returns: `true` if the shortcut is enabled, `false` if disabled,
+    ///   absent, or unreadable.
+    static func areSystemShortcutsEnabled() -> Bool {
+        let prefsURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Preferences/com.apple.symbolichotkeys.plist")
+
+        guard let data = try? Data(contentsOf: prefsURL),
+              let plist = try? PropertyListSerialization.propertyList(
+                  from: data, format: nil) as? [String: Any],
+              let hotkeys = plist["AppleSymbolicHotKeys"] as? [String: Any] else {
+            return false
+        }
+
+        // Key 52 = "Move window to Desktop 1" (community-sourced, needs verification)
+        guard let entry = hotkeys["52"] as? [String: Any] else {
+            return false  // Key absent = shortcut never configured
+        }
+
+        return (entry["enabled"] as? Bool) == true
     }
 }
 
@@ -769,6 +834,70 @@ class MenuBarController: NSObject {
         menu.insertItem(renameItem, at: insertIndex)
         spaceMenuItems.append(renameItem)
 
+        // --- Move Window submenu (after the Rename item) ---
+
+        // Only show if moveWindow feature is enabled in config
+        if config.moveWindow?.enabled == true {
+            insertIndex += 1  // skip past Rename item
+
+            let moveSubmenuItem = NSMenuItem(title: "Move Window To...", action: nil,
+                                              keyEquivalent: "")
+            let moveSubmenu = NSMenu()
+
+            // Add a destination item for each desktop on the active display,
+            // excluding the current desktop
+            for display in displays {
+                let isActiveDisplay = display.displayID == activeDisplayID
+                guard isActiveDisplay else { continue }
+
+                for space in display.spaces {
+                    if space.spaceID == currentSpaceID { continue }  // skip current
+
+                    let key = String(space.spaceID)
+                    let customName = config.spaces[key]
+                    let displayName: String
+                    if let name = customName, !name.isEmpty {
+                        displayName = "Desktop \(space.localPosition) - \(name)"
+                    } else {
+                        displayName = "Desktop \(space.localPosition)"
+                    }
+
+                    // Shift+Cmd+N as keyboard equivalent (active only when menu is open)
+                    let keyEquiv = space.localPosition <= 9
+                        ? String(space.localPosition) : ""
+                    let moveItem = NSMenuItem(title: displayName,
+                                               action: #selector(moveWindowToSpace(_:)),
+                                               keyEquivalent: keyEquiv)
+                    moveItem.keyEquivalentModifierMask = [.command, .shift]
+                    moveItem.target = self
+                    moveItem.tag = space.globalPosition
+                    moveSubmenu.addItem(moveItem)
+                }
+            }
+
+            moveSubmenuItem.submenu = moveSubmenu
+            menu.insertItem(moveSubmenuItem, at: insertIndex)
+            spaceMenuItems.append(moveSubmenuItem)
+        }
+
+        // "Set Up Window Moving..." item -- always shown when feature is enabled
+        // or when it hasn't been configured yet
+        if config.moveWindow?.enabled == true || config.moveWindow == nil {
+            insertIndex += 1
+            let setupItem = NSMenuItem(title: "Set Up Window Moving...",
+                                        action: #selector(showMoveWindowSetup),
+                                        keyEquivalent: "")
+            setupItem.target = self
+            // Only show if shortcuts are NOT enabled (acts as guidance trigger)
+            if config.moveWindow?.enabled == true
+                && WindowMover.areSystemShortcutsEnabled() {
+                // Shortcuts already enabled -- hide the setup item
+            } else {
+                menu.insertItem(setupItem, at: insertIndex)
+                spaceMenuItems.append(setupItem)
+            }
+        }
+
         if let toggleItem = menu.item(withTag: 100) {
             toggleItem.title = config.showSpaceNumber ? "Hide Space Number" : "Show Space Number"
         }
@@ -808,6 +937,65 @@ class MenuBarController: NSObject {
             statusItem.menu?.cancelTracking()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 SpaceNavigator.navigateToSpace(index: globalPosition)
+            }
+        }
+    }
+
+    /// Handle "Move Window To > Desktop N" submenu selection.
+    /// Closes the menu, waits for the previously-focused app to regain focus,
+    /// then synthesizes the Ctrl+Shift+N system shortcut.
+    @objc private func moveWindowToSpace(_ sender: NSMenuItem) {
+        let targetGlobalPosition = sender.tag
+        statusItem.menu?.cancelTracking()
+
+        // Wait 300ms for Jumpee's menu to close and the target app to regain focus.
+        // This is the same delay used by navigateToSpace(_:) and is proven reliable.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            WindowMover.moveToSpace(index: targetGlobalPosition)
+        }
+    }
+
+    /// Show a setup dialog guiding the user to enable "Move window to Desktop N"
+    /// shortcuts in System Settings.
+    @objc private func showMoveWindowSetup() {
+        let alert = NSAlert()
+        alert.messageText = "Set Up Window Moving"
+
+        if WindowMover.areSystemShortcutsEnabled() {
+            alert.informativeText = """
+                The "Move window to Desktop N" shortcuts are enabled. \
+                You can move windows using the Jumpee menu \
+                (Move Window To... submenu).
+                """
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+            return
+        }
+
+        alert.informativeText = """
+            To move windows between desktops, enable the \
+            "Move window to Desktop N" keyboard shortcuts in macOS:
+
+            1. Open System Settings > Keyboard > Keyboard Shortcuts
+            2. Select "Mission Control" in the left panel
+            3. Enable checkboxes for "Move window to Desktop 1" \
+            through "Move window to Desktop 9"
+            4. Ensure key combinations are Ctrl+Shift+1 through Ctrl+Shift+9
+
+            After enabling, add this to your ~/.Jumpee/config.json:
+            "moveWindow": { "enabled": true }
+            """
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
+
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+
+        if response == .alertFirstButtonReturn {
+            if let url = URL(string:
+                "x-apple.systempreferences:com.apple.preference.keyboard?Shortcuts") {
+                NSWorkspace.shared.open(url)
             }
         }
     }

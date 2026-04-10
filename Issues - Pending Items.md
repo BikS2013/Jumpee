@@ -16,6 +16,10 @@
 
 7. **Jumpee - Navigation limited to 9 desktops per display**: Desktop switching uses Ctrl+1 through Ctrl+9 shortcuts, limiting navigation to 9 desktops per display (and 9 total across all displays for global numbering).
 
+8. **Jumpee - Move Window: Plist key number verification needed**: The plist key numbers for "Move window to Desktop N" in `com.apple.symbolichotkeys` are believed to be 52, 54, 56, 58, 60, 62, 64, 66, 68 (even numbers). However, community documentation has conflicts (key 52 is listed as "Move focus to window drawer" in some sources). Must verify by enabling the shortcut in System Settings and inspecting the plist diff before implementing shortcut detection. See plan-004, Section 8.2.
+
+9. **Jumpee - Move Window: macOS 15+ forces follow-window behavior**: On macOS 15 (Sequoia) and later, all approaches to moving a window between spaces force the user to follow the window. "Move without following" is impossible. This is a platform limitation, not a Jumpee limitation. Documented in plan-004.
+
 ## Completed
 
 1. **Jumpee - Global hotkey**: Implemented configurable global hotkey (default Cmd+J) using Carbon RegisterEventHotKey API.

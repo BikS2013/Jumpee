@@ -93,6 +93,63 @@ See `docs/design/configuration-guide.md` for full details.
 - Maximum 9 desktops for navigation (limited by Ctrl+1 through Ctrl+9 shortcuts)
 - Space IDs (ManagedSpaceID) are stable across reboots and reorders but could theoretically be reassigned after a major macOS upgrade, requiring re-renaming
 
+## Window Mover (v1.2 -- Move Window to Desktop)
+
+This section describes the technical design for the "move focused window to Desktop N" feature. The full technical design is in `docs/design/technical-design-window-move.md`. The implementation plan is in `docs/design/plan-004-window-move-feature.md`.
+
+### Approach
+
+Jumpee synthesizes the macOS built-in "Move window to Desktop N" keyboard shortcuts (Ctrl+Shift+N) via CGEvent, using the same mechanism already used by SpaceNavigator for space switching (Ctrl+N). No CGS private APIs are used for the move operation.
+
+This approach was chosen because the CGS space-assignment APIs (`CGSAddWindowsToSpaces`, `CGSRemoveWindowsFromSpaces`) are broken on macOS 15+ (Sequoia) due to Apple adding connection-rights checks to the WindowServer. System shortcut synthesis is the only reliable approach across macOS 13-26.
+
+### Key Constraint
+
+The user must enable "Move window to Desktop N" shortcuts in System Settings > Keyboard > Keyboard Shortcuts > Mission Control. These are disabled by default. This is the same class of requirement Jumpee already has for "Switch to Desktop N" navigation shortcuts.
+
+### New Components
+
+1. **WindowMover** (class, static methods) -- Synthesizes Ctrl+Shift+N keystrokes to move the focused window. Also checks whether the system shortcuts are enabled by reading `com.apple.symbolichotkeys.plist`. Located after `SpaceNavigator` in `main.swift`.
+
+2. **MoveWindowConfig** (struct, Codable) -- Configuration for the move feature. Phase 1 contains only `enabled: Bool`. Located after `HotkeyConfig` in `main.swift`.
+
+3. **"Move Window To..." submenu** -- Added to the Jumpee dropdown menu in `rebuildSpaceItems()`. Lists all desktops on the active display except the current one. Uses Shift+Cmd+1-9 as keyboard equivalents when the menu is open.
+
+4. **"Set Up Window Moving..." menu item** -- Shown when the system shortcuts are not detected. Opens a guidance dialog with instructions and an "Open System Settings" button.
+
+### Configuration
+
+Optional `moveWindow` key in `~/.Jumpee/config.json`:
+
+```json
+{
+    "moveWindow": {
+        "enabled": true
+    }
+}
+```
+
+When absent, the feature is disabled. Existing configs work without modification.
+
+### Behavior
+
+- Move always switches to the target desktop (macOS 15+ forces this; no "stay behind" option).
+- Visual feedback is implicit: the overlay and menu bar title update via the existing `activeSpaceDidChangeNotification` handler.
+- Fullscreen windows, "Assign to All Desktops" windows, and system windows are silently ignored by macOS.
+
+### Integration with Existing Code
+
+- `SpaceNavigator.keyCodeForNumber(_:)` access changed from `private` to file-scope to allow reuse by `WindowMover`.
+- `JumpeeConfig` gains an optional `moveWindow: MoveWindowConfig?` property.
+- `MenuBarController.rebuildSpaceItems()` extended to add the move submenu when enabled.
+- Two new `@objc` handlers added to `MenuBarController`: `moveWindowToSpace(_:)` and `showMoveWindowSetup()`.
+
+### Phases
+
+- **Phase 1** (this design): Menu-based invocation only. ~120 lines added to `main.swift`.
+- **Phase 2** (future): Global hotkeys (Ctrl+Cmd+1-9), Move Left/Right One Space, configurable modifiers.
+- **Phase 3** (future): Cross-display window movement.
+
 ## Multi-Display Workspace Support (v1.1)
 
 This section describes the technical design for adding per-display workspace awareness to Jumpee. Currently, Jumpee flattens all macOS spaces into a single global list, discarding the display grouping returned by `CGSCopyManagedDisplaySpaces`. The v1.1 enhancement makes Jumpee display-aware: the menu shows only the active display's spaces, numbering and shortcuts are per-display, and the overlay appears on the correct screen.
