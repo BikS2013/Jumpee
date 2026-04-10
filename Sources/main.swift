@@ -12,6 +12,22 @@ func CGSGetActiveSpace(_ cid: Int32) -> Int
 @_silgen_name("CGSCopyManagedDisplaySpaces")
 func CGSCopyManagedDisplaySpaces(_ cid: Int32) -> CFArray
 
+// Symbolic hotkey APIs (used to look up "Switch to Desktop N" key combos)
+typealias CGSSymbolicHotKey = UInt32
+
+@_silgen_name("CGSGetSymbolicHotKeyValue")
+func CGSGetSymbolicHotKeyValue(_ hotKey: CGSSymbolicHotKey, _ unknown: UnsafeMutableRawPointer?, _ keyCode: UnsafeMutablePointer<CGKeyCode>, _ modifiers: UnsafeMutablePointer<CGEventFlags>) -> Int32
+
+@_silgen_name("CGSIsSymbolicHotKeyEnabled")
+func CGSIsSymbolicHotKeyEnabled(_ hotKey: CGSSymbolicHotKey) -> Bool
+
+@_silgen_name("CGSSetSymbolicHotKeyEnabled")
+func CGSSetSymbolicHotKeyEnabled(_ hotKey: CGSSymbolicHotKey, _ enabled: Bool) -> Int32
+
+// Private Accessibility API for getting CGWindowID from AXUIElement
+@_silgen_name("_AXUIElementGetWindow")
+func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
+
 
 // MARK: - Configuration
 
@@ -494,57 +510,131 @@ class SpaceNavigator {
 
 class WindowMover {
 
-    /// Move the focused window to the given desktop by synthesizing the macOS
-    /// "Move window to Desktop N" system shortcut (Ctrl+Shift+N).
+    /// Move the focused window to the given desktop using mouse-drag simulation.
     ///
-    /// Requires the user to have enabled "Move window to Desktop N" shortcuts
-    /// in System Settings > Keyboard > Keyboard Shortcuts > Mission Control.
+    /// This replicates the Amethyst 0.22.0+ approach for macOS 15 (Sequoia):
+    /// 1. Find the focused window's title bar position via Accessibility API
+    /// 2. Simulate mouse-down + drag on the title bar
+    /// 3. Fire the "Switch to Desktop N" system hotkey while dragging
+    /// 4. Release the mouse — the window lands on the new space
     ///
-    /// - Parameter index: 1-based global desktop position (1 through 9).
-    ///   Matches the global numbering used by SpaceNavigator.navigateToSpace(index:).
+    /// Requires "Switch to Desktop N" shortcuts to be enabled in System Settings
+    /// (the same shortcuts Jumpee already uses for space navigation).
+    ///
+    /// - Parameter index: 1-based global desktop position (1 through 16).
     static func moveToSpace(index: Int) {
-        guard index >= 1 && index <= 9 else { return }
-        let keyCode = SpaceNavigator.keyCodeForNumber(index)
-        let source = CGEventSource(stateID: .hidSystemState)
+        guard index >= 1 && index <= 16 else { return }
 
-        if let keyDown = CGEvent(keyboardEventSource: source,
-                                 virtualKey: CGKeyCode(keyCode), keyDown: true) {
-            keyDown.flags = [.maskControl, .maskShift]
-            keyDown.post(tap: .cghidEventTap)
+        // 1. Get the "Switch to Desktop N" hotkey from the OS
+        //    Symbolic hotkey IDs: Desktop 1 = 119, Desktop 2 = 120, ..., Desktop N = 118 + N
+        let symbolicHotKey: CGSSymbolicHotKey = UInt32(118 + index)
+        var keyCode: CGKeyCode = 0
+        var modifierFlags: CGEventFlags = []
+
+        let error = CGSGetSymbolicHotKeyValue(symbolicHotKey, nil, &keyCode, &modifierFlags)
+        guard error == 0 else { return }
+
+        // Temporarily enable the hotkey if it's disabled
+        let wasEnabled = CGSIsSymbolicHotKeyEnabled(symbolicHotKey)
+        if !wasEnabled {
+            _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, true)
         }
-        if let keyUp = CGEvent(keyboardEventSource: source,
-                                virtualKey: CGKeyCode(keyCode), keyDown: false) {
-            keyUp.flags = [.maskControl, .maskShift]
-            keyUp.post(tap: .cghidEventTap)
+
+        // 2. Get the focused window via Accessibility API
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedApp: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedApp) == .success else {
+            if !wasEnabled { _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, false) }
+            return
+        }
+
+        var focusedWindow: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(focusedApp as! AXUIElement, kAXFocusedWindowAttribute as CFString, &focusedWindow) == .success else {
+            if !wasEnabled { _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, false) }
+            return
+        }
+
+        let window = focusedWindow as! AXUIElement
+
+        // 3. Find cursor position in the title bar
+        var cursorPosition: CGPoint
+        var minimizeButton: CFTypeRef?
+        if AXUIElementCopyAttributeValue(window, kAXMinimizeButtonAttribute as CFString, &minimizeButton) == .success {
+            var posRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(minimizeButton as! AXUIElement, kAXPositionAttribute as CFString, &posRef)
+            var buttonPos = CGPoint.zero
+            if let posVal = posRef {
+                AXValueGetValue(posVal as! AXValue, .cgPoint, &buttonPos)
+            }
+            var winPosRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &winPosRef)
+            var winPos = CGPoint.zero
+            if let wVal = winPosRef {
+                AXValueGetValue(wVal as! AXValue, .cgPoint, &winPos)
+            }
+            cursorPosition = CGPoint(
+                x: buttonPos.x,
+                y: winPos.y + abs(winPos.y - buttonPos.y) / 2.0
+            )
+        } else {
+            // Fallback: near top-left of window
+            var winPosRef: CFTypeRef?
+            AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &winPosRef)
+            var winPos = CGPoint.zero
+            if let wVal = winPosRef {
+                AXValueGetValue(wVal as! AXValue, .cgPoint, &winPos)
+            }
+            cursorPosition = CGPoint(x: winPos.x + 40, y: winPos.y + 12)
+        }
+
+        // 4. Build mouse events for the drag simulation
+        guard let moveEvent = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                                       mouseCursorPosition: cursorPosition, mouseButton: .left),
+              let downEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown,
+                                       mouseCursorPosition: cursorPosition, mouseButton: .left),
+              let dragEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged,
+                                       mouseCursorPosition: cursorPosition, mouseButton: .left),
+              let upEvent   = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
+                                       mouseCursorPosition: cursorPosition, mouseButton: .left) else {
+            if !wasEnabled { _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, false) }
+            return
+        }
+        moveEvent.flags = []
+        downEvent.flags = []
+        upEvent.flags = []
+
+        // 5. Grab the window's title bar
+        moveEvent.post(tap: .cghidEventTap)
+        downEvent.post(tap: .cghidEventTap)
+        dragEvent.post(tap: .cghidEventTap)
+
+        // 6. After 50ms: fire the space-switch hotkey while window is grabbed
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            if let keyDown = CGEvent(keyboardEventSource: nil,
+                                     virtualKey: keyCode, keyDown: true) {
+                keyDown.flags = modifierFlags
+                keyDown.post(tap: .cghidEventTap)
+            }
+            if let keyUp = CGEvent(keyboardEventSource: nil,
+                                    virtualKey: keyCode, keyDown: false) {
+                keyUp.flags = []
+                keyUp.post(tap: .cghidEventTap)
+            }
+
+            // 7. After 400ms: release mouse — window lands on new space
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
+                upEvent.post(tap: .cghidEventTap)
+                if !wasEnabled {
+                    _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, false)
+                }
+            }
         }
     }
 
-    /// Check whether the macOS "Move window to Desktop N" system shortcuts
-    /// appear to be enabled by reading com.apple.symbolichotkeys.plist.
-    ///
-    /// Checks plist key 52 ("Move window to Desktop 1") as a representative
-    /// shortcut. If this key is enabled, we assume all move-window shortcuts
-    /// are configured.
-    ///
-    /// - Returns: `true` if the shortcut is enabled, `false` if disabled,
-    ///   absent, or unreadable.
+    /// Check whether "Switch to Desktop 1" shortcut is enabled.
+    /// This is the same shortcut Jumpee already requires for navigation.
     static func areSystemShortcutsEnabled() -> Bool {
-        let prefsURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Preferences/com.apple.symbolichotkeys.plist")
-
-        guard let data = try? Data(contentsOf: prefsURL),
-              let plist = try? PropertyListSerialization.propertyList(
-                  from: data, format: nil) as? [String: Any],
-              let hotkeys = plist["AppleSymbolicHotKeys"] as? [String: Any] else {
-            return false
-        }
-
-        // Key 52 = "Move window to Desktop 1" (community-sourced, needs verification)
-        guard let entry = hotkeys["52"] as? [String: Any] else {
-            return false  // Key absent = shortcut never configured
-        }
-
-        return (entry["enabled"] as? Bool) == true
+        return CGSIsSymbolicHotKeyEnabled(119)
     }
 }
 
@@ -963,9 +1053,12 @@ class MenuBarController: NSObject {
 
         if WindowMover.areSystemShortcutsEnabled() {
             alert.informativeText = """
-                The "Move window to Desktop N" shortcuts are enabled. \
+                The "Switch to Desktop N" shortcuts are enabled. \
                 You can move windows using the Jumpee menu \
                 (Move Window To... submenu).
+
+                To enable, add this to your ~/.Jumpee/config.json:
+                "moveWindow": { "enabled": true }
                 """
             alert.addButton(withTitle: "OK")
             NSApp.activate(ignoringOtherApps: true)
@@ -975,15 +1068,16 @@ class MenuBarController: NSObject {
 
         alert.informativeText = """
             To move windows between desktops, enable the \
-            "Move window to Desktop N" keyboard shortcuts in macOS:
+            "Switch to Desktop N" keyboard shortcuts in macOS:
 
             1. Open System Settings > Keyboard > Keyboard Shortcuts
             2. Select "Mission Control" in the left panel
-            3. Enable checkboxes for "Move window to Desktop 1" \
-            through "Move window to Desktop 9"
-            4. Ensure key combinations are Ctrl+Shift+1 through Ctrl+Shift+9
+            3. Enable checkboxes for "Switch to Desktop 1" \
+            through "Switch to Desktop 9"
 
-            After enabling, add this to your ~/.Jumpee/config.json:
+            These are the same shortcuts Jumpee uses for navigation. \
+            If desktop switching already works, just add this to \
+            your ~/.Jumpee/config.json:
             "moveWindow": { "enabled": true }
             """
         alert.addButton(withTitle: "Open System Settings")
