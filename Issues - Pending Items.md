@@ -36,7 +36,9 @@
 
 ## Completed
 
-1. **Jumpee - Global hotkey**: Implemented configurable global hotkey (default Cmd+J) using Carbon RegisterEventHotKey API.
+1. **Jumpee - Move Window hotkey did not show popup until app gained focus** (Sources/main.swift, openMoveWindowMenu, line 1544): Pressing the move-window hotkey from another app did nothing; the popup surfaced later when the user clicked a window, and queued presses surfaced sequentially after each ESC. Root cause: `NSMenu.popUp(positioning:at:in:)` requires the calling process to be the active app, but the global hotkey fires while another app is frontmost, so popUp was deferred until Jumpee became active. Fix: call `NSApp.activate(ignoringOtherApps: true)` immediately before popUp, then restore focus to the previously frontmost application via `NSWorkspace.shared.frontmostApplication.activate()` after the menu closes.
+
+2. **Jumpee - Global hotkey**: Implemented configurable global hotkey (default Cmd+J) using Carbon RegisterEventHotKey API.
 
 2. **Jumpee - Desktop switching**: Implemented desktop navigation via osascript subprocess with menu close/reopen flow.
 

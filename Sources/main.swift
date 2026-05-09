@@ -1581,8 +1581,23 @@ class MenuBarController: NSObject {
 
         guard menu.items.count > 0 else { return }
 
+        // The hotkey fires while another app is frontmost. NSMenu.popUp blocks
+        // (and silently queues) until our process becomes active, which is why
+        // pressing Cmd+M does nothing until the user clicks on a window — at
+        // that point every queued menu surfaces in sequence. Activate first so
+        // popUp runs immediately. ignoringOtherApps works for LSUIElement apps.
+        let previousApp = NSWorkspace.shared.frontmostApplication
+        NSApp.activate(ignoringOtherApps: true)
+
         let mouseLocation = NSEvent.mouseLocation
         menu.popUp(positioning: nil, at: mouseLocation, in: nil)
+
+        // popUp is modal; once it returns the user has chosen or dismissed the
+        // menu. Restore focus to whichever app was frontmost so the user can
+        // keep working without an extra click.
+        if let previousApp, previousApp.bundleIdentifier != Bundle.main.bundleIdentifier {
+            previousApp.activate()
+        }
     }
 
     @objc private func moveWindowFromPopup(_ sender: NSMenuItem) {
