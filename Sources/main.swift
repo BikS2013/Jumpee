@@ -101,6 +101,20 @@ struct HotkeyConfig: Codable {
         return mods
     }
 
+    var nsModifierFlags: NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        for mod in modifiers {
+            switch mod.lowercased() {
+            case "command", "cmd": flags.insert(.command)
+            case "control", "ctrl": flags.insert(.control)
+            case "option", "alt": flags.insert(.option)
+            case "shift": flags.insert(.shift)
+            default: break
+            }
+        }
+        return flags
+    }
+
     var displayString: String {
         var parts: [String] = []
         for mod in modifiers {
@@ -1326,6 +1340,27 @@ private enum HotkeySlot {
 
 private var globalMenuBarController: MenuBarController?
 
+// CGEvent tap state for closing the menu with the hotkey during menu tracking
+private var menuToggleTap: CFMachPort?
+private var menuToggleTapSource: CFRunLoopSource?
+private var menuToggleKeyCode: UInt16 = 0
+private var menuToggleModifiers: CGEventFlags = []
+
+private let menuToggleTapCallback: CGEventTapCallBack = { _, type, event, _ in
+    // Re-enable if the tap gets disabled by timeout
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        if let tap = menuToggleTap { CGEvent.tapEnable(tap: tap, enable: true) }
+        return Unmanaged.passUnretained(event)
+    }
+    let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+    let relevant: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+    if keyCode == menuToggleKeyCode && event.flags.intersection(relevant) == menuToggleModifiers {
+        globalMenuBarController?.statusItem.menu?.cancelTracking()
+        return nil  // consume the event
+    }
+    return Unmanaged.passUnretained(event)
+}
+
 func hotkeyEventHandler(nextHandler: EventHandlerCallRef?, event: EventRef?, userData: UnsafeMutableRawPointer?) -> OSStatus {
     var hotKeyID = EventHotKeyID()
     let status = GetEventParameter(
@@ -1416,6 +1451,28 @@ class GlobalHotkeyManager {
         }
     }
 
+    func unregisterDropdownHotkey() {
+        if let ref = hotkeyRef {
+            UnregisterEventHotKey(ref)
+            hotkeyRef = nil
+        }
+    }
+
+    func reregisterDropdownHotkey(config: HotkeyConfig) {
+        unregisterDropdownHotkey()
+        if let keyCode = config.keyCode {
+            let dropdownID = EventHotKeyID(signature: OSType(0x4A4D_5045), id: 1)
+            RegisterEventHotKey(
+                UInt32(keyCode),
+                config.carbonModifiers,
+                dropdownID,
+                GetApplicationEventTarget(),
+                0,
+                &hotkeyRef
+            )
+        }
+    }
+
     func unregister() {
         if let ref = hotkeyRef {
             UnregisterEventHotKey(ref)
@@ -1450,6 +1507,8 @@ class MenuBarController: NSObject {
     private let overlayManager: OverlayManager
     private var hotkeyManager: GlobalHotkeyManager?
     private var inputSourceManager: InputSourceIndicatorManager?
+    private var isMenuOpen: Bool = false
+    private var menuClosedAt: Date = .distantPast
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -1477,6 +1536,8 @@ class MenuBarController: NSObject {
     }
 
     func openMenu() {
+        if isMenuOpen { return }
+        if Date().timeIntervalSince(menuClosedAt) < 0.5 { return }
         statusItem.button?.performClick(nil)
     }
 
@@ -2393,7 +2454,60 @@ class MenuBarController: NSObject {
 
 extension MenuBarController: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
+        isMenuOpen = true
         rebuildSpaceItems()
+
+        // Unregister Carbon hotkey so the key combo flows through as a normal event,
+        // then install a CGEvent tap to intercept it and close the menu.
+        // (NSEvent local monitors do NOT fire during menu tracking — only CGEvent taps do.)
+        hotkeyManager?.unregisterDropdownHotkey()
+
+        let hotkeyConfig = config.hotkey
+        guard let keyCode = hotkeyConfig.keyCode else { return }
+        menuToggleKeyCode = UInt16(keyCode)
+        // Convert modifier strings to CGEventFlags
+        var mods: CGEventFlags = []
+        for mod in hotkeyConfig.modifiers {
+            switch mod.lowercased() {
+            case "command", "cmd": mods.insert(.maskCommand)
+            case "control", "ctrl": mods.insert(.maskControl)
+            case "option", "alt": mods.insert(.maskAlternate)
+            case "shift": mods.insert(.maskShift)
+            default: break
+            }
+        }
+        menuToggleModifiers = mods
+
+        let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
+        if let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: eventMask,
+            callback: menuToggleTapCallback,
+            userInfo: nil
+        ) {
+            menuToggleTap = tap
+            menuToggleTapSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+            CFRunLoopAddSource(CFRunLoopGetMain(), menuToggleTapSource, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+        }
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
+        menuClosedAt = Date()
+
+        // Remove CGEvent tap and re-register the Carbon hotkey
+        if let tap = menuToggleTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            if let source = menuToggleTapSource {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            }
+            menuToggleTap = nil
+            menuToggleTapSource = nil
+        }
+        hotkeyManager?.reregisterDropdownHotkey(config: config.hotkey)
     }
 }
 
