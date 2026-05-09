@@ -213,6 +213,13 @@ struct JumpeeConfig: Codable {
     var pinWindow: PinWindowConfig?
     var pinWindowHotkey: HotkeyConfig?
     var inputSourceIndicator: InputSourceIndicatorConfig?
+    var dropdownAtCursor: Bool?
+
+    /// Resolved dropdown-at-cursor preference: explicit config or default true.
+    /// Documented exception to the no-default-fallback rule (see Issues - Pending Items.md).
+    var effectiveDropdownAtCursor: Bool {
+        return dropdownAtCursor ?? true
+    }
 
     /// Resolved move-window hotkey: explicit config or default Cmd+M.
     /// Documented exception to the no-default-fallback rule (see Issues - Pending Items.md).
@@ -1538,7 +1545,30 @@ class MenuBarController: NSObject {
     func openMenu() {
         if isMenuOpen { return }
         if Date().timeIntervalSince(menuClosedAt) < 0.5 { return }
-        statusItem.button?.performClick(nil)
+
+        // When dropdownAtCursor is on, pop the menu where the user is looking
+        // instead of forcing them to the menu bar. Falling back to performClick
+        // keeps the original menu-bar behavior when the option is disabled or
+        // the menu has not yet been built.
+        if config.effectiveDropdownAtCursor, let menu = statusItem.menu {
+            // Same focus issue as Move Window: the global hotkey fires while
+            // another app is frontmost, so popUp is queued until Jumpee
+            // becomes active. Activate first, then restore focus afterward.
+            let previousApp = NSWorkspace.shared.frontmostApplication
+            NSApp.activate(ignoringOtherApps: true)
+
+            // Detach the menu from the status item for the duration of popUp;
+            // otherwise AppKit can route the click back through the menu bar.
+            statusItem.menu = nil
+            menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+            statusItem.menu = menu
+
+            if let previousApp, previousApp.bundleIdentifier != Bundle.main.bundleIdentifier {
+                previousApp.activate()
+            }
+        } else {
+            statusItem.button?.performClick(nil)
+        }
     }
 
     func openMoveWindowMenu() {
@@ -1689,6 +1719,17 @@ class MenuBarController: NSObject {
         isiToggleItem.target = self
         isiToggleItem.tag = 102
         menu.addItem(isiToggleItem)
+
+        let dropdownPositionItem = NSMenuItem(
+            title: config.effectiveDropdownAtCursor
+                ? "Show Dropdown At Menu Bar"
+                : "Show Dropdown At Cursor",
+            action: #selector(toggleDropdownAtCursor),
+            keyEquivalent: ""
+        )
+        dropdownPositionItem.target = self
+        dropdownPositionItem.tag = 103
+        menu.addItem(dropdownPositionItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -1964,6 +2005,11 @@ class MenuBarController: NSObject {
                 ? "Disable Input Source Indicator"
                 : "Enable Input Source Indicator"
         }
+        if let dropdownPositionItem = menu.item(withTag: 103) {
+            dropdownPositionItem.title = config.effectiveDropdownAtCursor
+                ? "Show Dropdown At Menu Bar"
+                : "Show Dropdown At Cursor"
+        }
 
         // Update hotkey menu items
         if let item = menu.item(withTag: 300) {
@@ -2164,6 +2210,11 @@ class MenuBarController: NSObject {
         config.overlay.enabled.toggle()
         config.save()
         overlayManager.updateOverlay(config: config)
+    }
+
+    @objc private func toggleDropdownAtCursor() {
+        config.dropdownAtCursor = !config.effectiveDropdownAtCursor
+        config.save()
     }
 
     @objc private func toggleInputSourceIndicator(_ sender: NSMenuItem) {
