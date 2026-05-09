@@ -214,11 +214,19 @@ struct JumpeeConfig: Codable {
     var pinWindowHotkey: HotkeyConfig?
     var inputSourceIndicator: InputSourceIndicatorConfig?
     var dropdownAtCursor: Bool?
+    var menuBarVisible: Bool?
 
     /// Resolved dropdown-at-cursor preference: explicit config or default true.
     /// Documented exception to the no-default-fallback rule (see Issues - Pending Items.md).
     var effectiveDropdownAtCursor: Bool {
         return dropdownAtCursor ?? true
+    }
+
+    /// Resolved menu-bar visibility preference: explicit config or default true.
+    /// When false, the status item is hidden but global hotkeys remain active.
+    /// Documented exception to the no-default-fallback rule (see Issues - Pending Items.md).
+    var effectiveMenuBarVisible: Bool {
+        return menuBarVisible ?? true
     }
 
     /// Resolved move-window hotkey: explicit config or default Cmd+M.
@@ -1526,6 +1534,7 @@ class MenuBarController: NSObject {
         migratePositionBasedConfig()
         setupMenu()
         updateTitle()
+        statusItem.isVisible = config.effectiveMenuBarVisible
         registerForSpaceChanges()
 
         globalMenuBarController = self
@@ -1546,11 +1555,12 @@ class MenuBarController: NSObject {
         if isMenuOpen { return }
         if Date().timeIntervalSince(menuClosedAt) < 0.5 { return }
 
-        // When dropdownAtCursor is on, pop the menu where the user is looking
-        // instead of forcing them to the menu bar. Falling back to performClick
-        // keeps the original menu-bar behavior when the option is disabled or
-        // the menu has not yet been built.
-        if config.effectiveDropdownAtCursor, let menu = statusItem.menu {
+        // When dropdownAtCursor is on — or when the bar icon is hidden, since
+        // performClick on an invisible status item is a no-op — pop the menu
+        // where the user is looking. Otherwise keep the original menu-bar
+        // behavior via performClick on the visible status item button.
+        let needsCursorPopup = config.effectiveDropdownAtCursor || !config.effectiveMenuBarVisible
+        if needsCursorPopup, let menu = statusItem.menu {
             // Same focus issue as Move Window: the global hotkey fires while
             // another app is frontmost, so popUp is queued until Jumpee
             // becomes active. Activate first, then restore focus afterward.
@@ -1731,6 +1741,17 @@ class MenuBarController: NSObject {
         dropdownPositionItem.tag = 103
         menu.addItem(dropdownPositionItem)
 
+        let menuBarVisibilityItem = NSMenuItem(
+            title: config.effectiveMenuBarVisible
+                ? "Hide Menu Bar Icon"
+                : "Show Menu Bar Icon",
+            action: #selector(toggleMenuBarVisibility),
+            keyEquivalent: ""
+        )
+        menuBarVisibilityItem.target = self
+        menuBarVisibilityItem.tag = 104
+        menu.addItem(menuBarVisibilityItem)
+
         menu.addItem(NSMenuItem.separator())
 
         let hotkeysHeader = NSMenuItem(title: "Hotkeys:", action: nil, keyEquivalent: "")
@@ -1804,8 +1825,11 @@ class MenuBarController: NSObject {
         }
     }
 
-    private func rebuildSpaceItems() {
-        guard let menu = statusItem.menu else { return }
+    private func rebuildSpaceItems(menu menuOverride: NSMenu? = nil) {
+        // Prefer the explicitly-passed menu (e.g. the one delivered to
+        // menuWillOpen) so refresh still works while statusItem.menu has
+        // been temporarily detached for a cursor-anchored popUp.
+        guard let menu = menuOverride ?? statusItem.menu else { return }
 
         for item in spaceMenuItems {
             menu.removeItem(item)
@@ -2009,6 +2033,11 @@ class MenuBarController: NSObject {
             dropdownPositionItem.title = config.effectiveDropdownAtCursor
                 ? "Show Dropdown At Menu Bar"
                 : "Show Dropdown At Cursor"
+        }
+        if let menuBarVisibilityItem = menu.item(withTag: 104) {
+            menuBarVisibilityItem.title = config.effectiveMenuBarVisible
+                ? "Hide Menu Bar Icon"
+                : "Show Menu Bar Icon"
         }
 
         // Update hotkey menu items
@@ -2215,6 +2244,13 @@ class MenuBarController: NSObject {
     @objc private func toggleDropdownAtCursor() {
         config.dropdownAtCursor = !config.effectiveDropdownAtCursor
         config.save()
+    }
+
+    @objc private func toggleMenuBarVisibility() {
+        let newValue = !config.effectiveMenuBarVisible
+        config.menuBarVisible = newValue
+        config.save()
+        statusItem.isVisible = newValue
     }
 
     @objc private func toggleInputSourceIndicator(_ sender: NSMenuItem) {
@@ -2495,6 +2531,7 @@ class MenuBarController: NSObject {
         config = JumpeeConfig.load()
         updateTitle()
         overlayManager.updateOverlay(config: config)
+        statusItem.isVisible = config.effectiveMenuBarVisible
         reRegisterHotkeys()
 
         if config.inputSourceIndicator?.enabled == true {
@@ -2521,7 +2558,7 @@ class MenuBarController: NSObject {
 extension MenuBarController: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         isMenuOpen = true
-        rebuildSpaceItems()
+        rebuildSpaceItems(menu: menu)
 
         // Unregister Carbon hotkey so the key combo flows through as a normal event,
         // then install a CGEvent tap to intercept it and close the menu.
