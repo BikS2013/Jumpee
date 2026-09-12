@@ -30,7 +30,10 @@ brew uninstall --cask jumpee
 
 ## Install manually
 
-Download `Jumpee-x.x.x.zip` from [Releases](https://github.com/BikS2013/Jumpee/releases), extract, and move `Jumpee.app` to `/Applications/`.
+Download from [Releases](https://github.com/BikS2013/Jumpee/releases), either:
+
+- `Jumpee-x.x.x.dmg` — open it and drag `Jumpee.app` onto the `Applications` shortcut, or
+- `Jumpee-x.x.x.zip` — extract and move `Jumpee.app` to `/Applications/`.
 
 Releases from v1.6.0 onward are signed with a Developer ID Application certificate and notarized by Apple, so macOS opens the app without a Gatekeeper warning. Only older releases (v1.5.1 and earlier) need the quarantine flag removed:
 ```bash
@@ -58,7 +61,7 @@ cp -r build/Jumpee.app /Applications/
 
 ### Build a signed release package
 
-`package.sh` builds, signs, notarizes, staples, and zips the app into `dist/Jumpee-<version>.zip`. The version is set by `VERSION=` in `build.sh`. A Developer ID Application identity is required (the script refuses to package an ad-hoc-signed build), and a notarytool keychain profile is needed for notarization:
+`package.sh` builds, signs, notarizes, and staples the app, then produces `dist/Jumpee-<version>.zip` and a signed, notarized drag-to-Applications disk image `dist/Jumpee-<version>.dmg`. Pass `--dmg-only` to rebuild just the disk image from the existing stapled `build/Jumpee.app`. The version is set by `VERSION=` in `build.sh`. A Developer ID Application identity is required (the script refuses to package an ad-hoc-signed build), and a notarytool keychain profile is needed for notarization:
 ```bash
 CODESIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" NOTARY_PROFILE=jumpee-notary bash package.sh
 ```
