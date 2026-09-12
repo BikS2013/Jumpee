@@ -32,7 +32,7 @@ brew uninstall --cask jumpee
 
 Download `Jumpee-x.x.x.zip` from [Releases](https://github.com/BikS2013/Jumpee/releases), extract, and move `Jumpee.app` to `/Applications/`.
 
-Since the app is not notarized with Apple, macOS will block it on first launch. Remove the quarantine flag:
+Releases from v1.6.0 onward are signed with a Developer ID Application certificate (hardened runtime, timestamped), but they are not yet notarized with Apple, so macOS will still block the app on first launch. Remove the quarantine flag:
 ```bash
 xattr -d com.apple.quarantine /Applications/Jumpee.app
 ```
@@ -56,6 +56,19 @@ To install the local build:
 ```bash
 cp -r build/Jumpee.app /Applications/
 ```
+
+### Build a signed release package
+
+`package.sh` builds, signs, and zips the app into `dist/Jumpee-<version>.zip`. The version is set by `VERSION=` in `build.sh`. A Developer ID Application identity is required (the script refuses to package an ad-hoc-signed build):
+```bash
+CODESIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" bash package.sh
+```
+To also notarize and staple, create a notarytool keychain profile once and pass its name:
+```bash
+xcrun notarytool store-credentials jumpee-notary --apple-id <apple-id> --team-id <TEAMID> --password <app-specific-password>
+CODESIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" NOTARY_PROFILE=jumpee-notary bash package.sh
+```
+Plain `bash build.sh` (no `CODESIGN_IDENTITY`) keeps producing an ad-hoc-signed development build.
 
 ### Known Build Issue — SwiftBridging Module
 If you get a `redefinition of module 'SwiftBridging'` error, rename the stale modulemap:

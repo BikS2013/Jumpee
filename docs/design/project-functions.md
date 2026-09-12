@@ -146,7 +146,7 @@ Space navigation (Ctrl+N) and window moving (Ctrl+Shift+N) both require the user
 Minimum macOS 13 (Ventura). All features work on macOS 13, 14 (Sonoma), 15 (Sequoia), and are expected to work on macOS 26 (Tahoe).
 
 ### NFR-5: Code Signing
-Ad-hoc code signing (`codesign --force --sign -`) ensures Accessibility permissions persist across rebuilds.
+Development builds (`build.sh` without `CODESIGN_IDENTITY`) are ad-hoc signed (`codesign --force --sign -`) so Accessibility permissions persist across local rebuilds. Release packages (`package.sh`, from v1.6.0) must be signed with a Developer ID Application identity, with the hardened runtime enabled and a secure timestamp; `package.sh` refuses to package an ad-hoc build. Notarization and stapling are supported through the optional `NOTARY_PROFILE` (a notarytool keychain profile) but are not yet performed, so downloaded releases still require removing the quarantine attribute.
 
 ### NFR-6: Low Latency
 Space navigation and window moving should complete within 500ms perceived delay. The 300ms menu-close delay before keystroke synthesis is the primary latency contributor.
