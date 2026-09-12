@@ -20,7 +20,7 @@ brew tap BikS2013/jumpee
 brew install --cask jumpee
 ```
 
-The Homebrew cask automatically removes the Gatekeeper quarantine flag. Launch from `/Applications/Jumpee.app` or Spotlight.
+Launch from `/Applications/Jumpee.app` or Spotlight.
 
 ### Uninstall
 
@@ -32,11 +32,10 @@ brew uninstall --cask jumpee
 
 Download `Jumpee-x.x.x.zip` from [Releases](https://github.com/BikS2013/Jumpee/releases), extract, and move `Jumpee.app` to `/Applications/`.
 
-Releases from v1.6.0 onward are signed with a Developer ID Application certificate (hardened runtime, timestamped), but they are not yet notarized with Apple, so macOS will still block the app on first launch. Remove the quarantine flag:
+Releases from v1.6.0 onward are signed with a Developer ID Application certificate and notarized by Apple, so macOS opens the app without a Gatekeeper warning. Only older releases (v1.5.1 and earlier) need the quarantine flag removed:
 ```bash
 xattr -d com.apple.quarantine /Applications/Jumpee.app
 ```
-Or: right-click `Jumpee.app` in Finder > **Open** > click **Open** in the dialog.
 
 ## Build from source
 
@@ -59,15 +58,15 @@ cp -r build/Jumpee.app /Applications/
 
 ### Build a signed release package
 
-`package.sh` builds, signs, and zips the app into `dist/Jumpee-<version>.zip`. The version is set by `VERSION=` in `build.sh`. A Developer ID Application identity is required (the script refuses to package an ad-hoc-signed build):
+`package.sh` builds, signs, notarizes, staples, and zips the app into `dist/Jumpee-<version>.zip`. The version is set by `VERSION=` in `build.sh`. A Developer ID Application identity is required (the script refuses to package an ad-hoc-signed build), and a notarytool keychain profile is needed for notarization:
 ```bash
-CODESIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" bash package.sh
-```
-To also notarize and staple, create a notarytool keychain profile once and pass its name:
-```bash
-xcrun notarytool store-credentials jumpee-notary --apple-id <apple-id> --team-id <TEAMID> --password <app-specific-password>
 CODESIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" NOTARY_PROFILE=jumpee-notary bash package.sh
 ```
+Create the `jumpee-notary` profile once, from an App Store Connect API key (Users and Access > Integrations > App Store Connect API, role Developer):
+```bash
+xcrun notarytool store-credentials jumpee-notary --key ~/path/AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER-ID>
+```
+Omit `NOTARY_PROFILE` to produce a signed but un-notarized package (local testing only).
 Plain `bash build.sh` (no `CODESIGN_IDENTITY`) keeps producing an ad-hoc-signed development build.
 
 ### Known Build Issue — SwiftBridging Module
