@@ -1,0 +1,983 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jumpee — name your desktops, then jump between them</title>
+<style>
+  :root {
+    /* BikS2013 theme of the nbg-design skill — ink and copper on warm paper */
+    --ink: #1B1D21;
+    --copper: #C8623A;
+    --copper-light: #E08A5E;
+    --amber: #E3A64A;
+    --black: #111316;
+    --grey-1: #C9CCD1;
+    --grey-2: #6E7379;
+    --paper: #F6F3EC;
+    --white: #FFFFFF;
+    --body: #1B1D21;
+    --sans: "Avenir Next", "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--black); overflow: hidden; font-family: var(--sans); }
+
+  /* ---- viewport frame + scaled 1920x1080 stage ---- */
+  #frame { position: fixed; inset: 0; overflow: hidden; background: var(--black); }
+  #stage { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  .slide { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--paper); color: var(--body); display: none; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  .slide.active { display: block; }
+
+  /* ---- navigation chrome (outside the slides) ---- */
+  #nav { position: fixed; right: 18px; bottom: 14px; display: flex; gap: 6px; align-items: center; z-index: 50; font-family: var(--sans); opacity: 0; transition: opacity .25s ease; pointer-events: none; }
+  #nav.show { opacity: 1; pointer-events: auto; }
+  #nav button { border: 0; background: rgba(246,243,236,0.10); color: rgba(246,243,236,0.85); width: 34px; height: 34px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+  #nav button:hover { background: rgba(200,98,58,0.35); }
+  #nav .counter { color: rgba(246,243,236,0.6); font-size: 13px; padding: 0 8px; font-variant-numeric: tabular-nums; }
+  #progress { position: fixed; left: 0; bottom: 0; height: 3px; background: var(--copper-light); width: 0; z-index: 50; transition: width .2s ease; }
+
+  /* ---- shared slide primitives (artboard px) ---- */
+  .eyebrow { position: absolute; top: 70px; left: 90px; font-family: var(--mono); font-size: 15px; letter-spacing: 3px; text-transform: uppercase; color: var(--copper); font-weight: 500; }
+  .title { position: absolute; top: 110px; left: 90px; right: 90px; font-size: 56px; font-weight: 300; line-height: 1.05; letter-spacing: -1px; color: var(--ink); text-wrap: balance; }
+  .title em { font-style: italic; font-weight: 400; color: var(--copper); }
+  .rule { position: absolute; top: 290px; left: 90px; width: 120px; height: 0; border-top: 2px dashed var(--copper); }
+  .body { position: absolute; top: 340px; left: 90px; right: 90px; font-size: 22px; line-height: 1.55; color: rgba(27,29,33,0.85); }
+  .body p { margin: 0 0 22px; text-wrap: pretty; }
+  .body ul { margin: 0; padding-left: 26px; }
+  .body li { margin: 0 0 12px; text-wrap: pretty; }
+  .body li::marker { color: var(--copper); }
+  .lead { font-size: 26px; line-height: 1.45; color: var(--ink); }
+  .muted { color: rgba(27,29,33,0.6); }
+  .note { position: absolute; left: 90px; right: 90px; bottom: 110px; font-size: 15px; line-height: 1.4; color: rgba(27,29,33,0.55); }
+  code, .k { font-family: var(--mono); font-size: 0.92em; background: rgba(27,29,33,0.07); color: var(--ink); padding: 2px 7px; border-radius: 5px; white-space: nowrap; }
+  .dark code, .dark .k { background: rgba(255,255,255,0.12); color: var(--paper); }
+  .kbd { display: inline-block; font-family: var(--mono); font-size: 15px; background: var(--ink); color: var(--paper); border-radius: 6px; padding: 4px 10px; margin: 0 3px 0 0; }
+  .card.ink .kbd { background: rgba(255,255,255,0.15); }
+  .kbd.copper { background: var(--copper); color: var(--white); }
+
+  .footer { position: absolute; left: 54px; right: 54px; bottom: 36px; display: flex; align-items: center; justify-content: space-between; color: rgba(27,29,33,0.55); font-size: 18px; letter-spacing: .4px; }
+  .footer .brand { display: flex; align-items: center; gap: 18px; }
+  .footer .brand img { height: 28px; width: auto; display: block; }
+  .footer .brand span { opacity: .7; }
+  .footer .pg { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 500; letter-spacing: 1px; }
+  .dark .footer { color: rgba(255,255,255,0.7); }
+
+  /* ---- layout helpers ---- */
+  .grid { position: absolute; top: 340px; left: 90px; right: 90px; display: grid; gap: 40px; }
+  .grid.g2 { grid-template-columns: repeat(2, 1fr); }
+  .grid.g3 { grid-template-columns: repeat(3, 1fr); }
+  .grid.g4 { grid-template-columns: repeat(4, 1fr); gap: 28px; }
+  .col .n { font-size: 64px; font-weight: 200; color: var(--copper); line-height: 1; letter-spacing: -2px; }
+  .col h3 { margin: 22px 0 0; font-size: 26px; font-weight: 600; color: var(--ink); line-height: 1.2; }
+  .col p { margin: 14px 0 0; font-size: 18px; line-height: 1.55; color: rgba(27,29,33,0.78); text-wrap: pretty; }
+  .col ul { margin: 14px 0 0; padding-left: 22px; font-size: 18px; line-height: 1.5; color: rgba(27,29,33,0.78); }
+  .col li { margin-bottom: 8px; }
+  .col li::marker { color: var(--copper); }
+
+  .card { background: var(--white); border: 1px solid rgba(27,29,33,0.12); border-radius: 16px; padding: 28px 30px; box-shadow: 0 12px 40px -24px rgba(27,29,33,0.25); }
+  .card.tint { background: rgba(27,29,33,0.045); border-color: transparent; box-shadow: none; }
+  .card.ink { background: var(--ink); color: var(--paper); border-color: transparent; }
+  .card.copper { background: var(--copper); color: var(--white); border-color: transparent; box-shadow: none; }
+  .card h3 { margin: 0; font-size: 24px; font-weight: 600; color: var(--ink); line-height: 1.2; }
+  .card.ink h3, .card.copper h3 { color: var(--paper); }
+  .card.copper h3 { color: var(--white); }
+  .card p { margin: 12px 0 0; font-size: 18px; line-height: 1.5; color: rgba(27,29,33,0.8); }
+  .card.ink p, .card.copper p { color: rgba(246,243,236,0.85); }
+  .card.copper p { color: rgba(255,255,255,0.9); }
+  .card ul { margin: 12px 0 0; padding-left: 22px; font-size: 18px; line-height: 1.5; color: rgba(27,29,33,0.8); }
+  .card.ink ul, .card.copper ul { color: rgba(246,243,236,0.85); }
+  .card li { margin-bottom: 8px; }
+  .card li::marker { color: var(--copper); }
+  .card.ink li::marker, .card.copper li::marker { color: var(--copper-light); }
+  .card .tag { display: inline-block; font-family: var(--mono); font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--copper); font-weight: 500; margin-bottom: 10px; }
+  .card.ink .tag { color: var(--copper-light); }
+  .card.copper .tag { color: rgba(255,255,255,0.8); }
+  .card.ink code { background: rgba(255,255,255,0.14); color: var(--paper); }
+  .card.copper code { background: rgba(0,0,0,0.18); color: var(--white); }
+
+  .kv { position: absolute; top: 340px; left: 90px; right: 90px; }
+  .kv .row { display: grid; grid-template-columns: 400px 1fr; gap: 40px; padding: 16px 0; border-bottom: 1px dashed rgba(27,29,33,0.28); font-size: 20px; line-height: 1.45; align-items: baseline; }
+  .kv .row:last-child { border-bottom: 0; }
+  .kv .key { font-family: var(--mono); font-size: 18px; color: var(--ink); font-weight: 600; }
+  .kv .val { color: rgba(27,29,33,0.85); }
+
+  table.t { position: absolute; top: 340px; left: 90px; width: 1740px; border-collapse: collapse; font-size: 19px; line-height: 1.4; }
+  table.t th { text-align: left; font-family: var(--mono); font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--copper); font-weight: 500; padding: 0 18px 14px 0; border-bottom: 2px solid var(--ink); }
+  table.t td { padding: 14px 18px 14px 0; border-bottom: 1px solid rgba(27,29,33,0.12); vertical-align: top; color: rgba(27,29,33,0.85); }
+  table.t td.k { font-family: var(--mono); font-size: 17px; color: var(--ink); font-weight: 600; background: none; padding-left: 0; white-space: nowrap; }
+  table.t.compact td { padding-top: 10px; padding-bottom: 10px; font-size: 17px; }
+  table.t.compact td.k { font-size: 15px; }
+
+  pre.code { position: absolute; margin: 0; font-family: var(--mono); font-size: 18px; line-height: 1.6; color: var(--paper); background: var(--ink); border-radius: 16px; padding: 28px 34px; white-space: pre; overflow: hidden; }
+  pre.code .c { color: rgba(246,243,236,0.5); }
+  pre.code .h { color: var(--copper-light); }
+  pre.code .g { color: var(--amber); }
+
+  .pill { display: inline-block; padding: 6px 14px; border-radius: 999px; background: rgba(200,98,58,0.14); color: var(--ink); font-size: 16px; font-weight: 600; letter-spacing: .3px; margin: 0 8px 8px 0; }
+  .pill.ink { background: rgba(27,29,33,0.08); }
+  .pill.on { background: var(--ink); color: var(--paper); }
+
+  .callout { position: absolute; left: 90px; right: 90px; bottom: 116px; background: var(--white); border-left: 6px solid var(--copper); border-radius: 0 14px 14px 0; padding: 20px 30px; font-size: 20px; line-height: 1.5; color: var(--ink); }
+  .callout.warn { border-left-color: var(--ink); background: rgba(27,29,33,0.06); }
+  .callout strong { font-weight: 700; }
+
+  .steps { position: absolute; top: 340px; left: 90px; right: 90px; display: grid; gap: 20px; }
+  .step { display: grid; grid-template-columns: 72px 1fr; gap: 24px; align-items: start; }
+  .step .n { width: 56px; height: 56px; border-radius: 50%; background: var(--ink); color: var(--copper-light); font-size: 24px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+  .step h3 { margin: 6px 0 0; font-size: 24px; font-weight: 600; color: var(--ink); }
+  .step p { margin: 6px 0 0; font-size: 18px; line-height: 1.5; color: rgba(27,29,33,0.8); }
+
+  .stat { position: absolute; top: 360px; left: 90px; }
+  .stat .big { font-size: 200px; font-weight: 200; letter-spacing: -8px; line-height: .9; color: var(--ink); }
+  .stat .big span { color: var(--copper); }
+  .stat .cap { margin-top: 24px; font-size: 26px; color: var(--ink); max-width: 760px; line-height: 1.3; }
+  .stat-list { position: absolute; top: 380px; right: 90px; width: 700px; }
+  .stat-list .row { display: flex; justify-content: space-between; align-items: baseline; padding: 18px 0; border-bottom: 1px dashed rgba(27,29,33,0.28); }
+  .stat-list .row span:first-child { font-size: 20px; color: rgba(27,29,33,0.7); }
+  .stat-list .row span:last-child { font-size: 28px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  /* ---- covers & dividers ---- */
+  .cover { background: var(--black); color: var(--paper); }
+  .cover h1 { position: absolute; top: 250px; left: 90px; right: 470px; margin: 0; font-size: 108px; line-height: .97; font-weight: 300; letter-spacing: -2.5px; color: var(--paper); text-wrap: balance; }
+  .cover h1 span { color: var(--copper-light); font-style: italic; font-weight: 400; }
+  .cover .eyebrow { color: var(--copper-light); }
+  .cover .sub { position: absolute; top: 600px; left: 90px; right: 520px; font-size: 28px; font-weight: 400; opacity: .86; line-height: 1.35; }
+  .cover .meta { position: absolute; left: 90px; bottom: 80px; font-size: 16px; letter-spacing: .4px; line-height: 1.5; opacity: .78; }
+  .cover .logo { position: absolute; right: 60px; bottom: 80px; }
+  .cover .logo img { height: 56px; width: auto; display: block; }
+  .cover .field { position: absolute; top: 0; right: 0; width: 380px; height: 380px; background: var(--copper); }
+  /* top clear of the copper field (which ends at 380) so the numeral is never clipped by it */
+  .cover .ghost { position: absolute; top: 400px; right: 96px; font-size: 190px; font-weight: 200; line-height: 1; color: var(--copper); opacity: .22; }
+  .cover .dots { position: absolute; inset: 0; opacity: .12; }
+  /* cover with a photograph: copy column on the left, tall photo panel on the right (slide 01 only,
+     so the closing slide keeps the type-led treatment and its copper field) */
+  .cover.has-photo .photo { position: absolute; top: 100px; right: 60px; width: 720px; height: 880px; border-radius: 18px; overflow: hidden; background: var(--ink); }
+  .cover.has-photo .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cover.has-photo .accent { position: absolute; top: 100px; right: 796px; width: 6px; height: 880px; background: var(--copper); }
+  .cover.has-photo h1 { top: 220px; right: 900px; font-size: 100px; }
+  .cover.has-photo .sub { top: 600px; right: 980px; }
+  .cover.has-photo .meta { bottom: 190px; }
+  .cover.has-photo .logo { left: 90px; right: auto; }
+
+  .divider-dark { background: var(--ink); color: var(--paper); }
+  .divider-dark .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 12px; background: var(--copper-light); }
+  /* full-height photograph on the right, dissolving into the ink ground at its left edge */
+  .divider-dark .photo { position: absolute; top: 0; right: 0; width: 860px; height: 1080px; overflow: hidden; }
+  .divider-dark .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .divider-dark .photo::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, #1B1D21 0%, rgba(27,29,33,0.6) 16%, rgba(27,29,33,0) 46%); }
+  .divider-dark .num { position: absolute; top: 250px; left: 90px; font-size: 230px; font-weight: 200; line-height: 1; letter-spacing: -9px; color: var(--copper-light); }
+  .divider-dark .label { position: absolute; top: 530px; left: 90px; width: 800px; font-size: 74px; font-weight: 300; line-height: 1.02; letter-spacing: -1.5px; color: var(--paper); text-wrap: balance; }
+  .divider-dark .cap { position: absolute; top: 740px; left: 90px; width: 760px; font-size: 24px; line-height: 1.45; color: rgba(246,243,236,0.72); }
+  .divider-dark .footer { text-shadow: 0 1px 6px rgba(17,19,22,0.65); }
+
+  .divider-bright { background: var(--paper); color: var(--ink); }
+  /* photograph in the bottom-right corner, with a copper accent rule down its left edge */
+  .divider-bright .photo { position: absolute; right: 0; bottom: 0; width: 780px; height: 780px; overflow: hidden; border-top-left-radius: 24px; }
+  .divider-bright .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .divider-bright .accent { position: absolute; right: 780px; bottom: 0; width: 8px; height: 780px; background: var(--copper); }
+  .divider-bright .eyebrow { color: var(--copper); font-weight: 700; }
+  .divider-bright .num { position: absolute; top: 210px; left: 90px; font-size: 300px; font-weight: 200; line-height: .9; letter-spacing: -12px; color: var(--ink); }
+  .divider-bright .label { position: absolute; top: 610px; left: 90px; max-width: 980px; font-size: 70px; font-weight: 300; letter-spacing: -1.5px; color: var(--ink); text-wrap: balance; line-height: 1; }
+  .divider-bright .cap { position: absolute; top: 720px; left: 90px; max-width: 900px; font-size: 24px; line-height: 1.4; color: rgba(27,29,33,0.7); }
+  /* the page number lands on the copper field, where the default dark grey has too little contrast */
+  .divider-bright .footer .pg { color: rgba(255,255,255,0.95); }
+
+  /* ---- macOS UI mocks (type-led, drawn in CSS — no screenshots) ---- */
+  .mock { position: absolute; border-radius: 18px; overflow: hidden; background: var(--ink); box-shadow: 0 34px 90px -44px rgba(27,29,33,0.6); }
+  .mock .bar { height: 46px; background: rgba(17,19,22,0.98); display: flex; align-items: center; gap: 22px; padding: 0 20px; color: rgba(246,243,236,0.9); font-size: 17px; }
+  .mock .bar .sym { font-size: 19px; opacity: .9; }
+  .mock .bar .right { margin-left: auto; display: flex; gap: 20px; opacity: .85; font-variant-numeric: tabular-nums; }
+  .mock .bar .item { padding: 5px 12px; border-radius: 7px; background: var(--copper); color: var(--white); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .mock .screen { position: relative; height: calc(100% - 46px); background: linear-gradient(155deg, #262A30 0%, #1B1D21 55%, #15171A 100%); overflow: hidden; }
+  .mock .screen .grid-lines { position: absolute; inset: 0; opacity: .04; }
+  .mock .wm { position: absolute; left: 0; right: 0; text-align: center; font-size: 78px; font-weight: 700; letter-spacing: 3px; }
+  .mock .isi { position: absolute; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.3); border-radius: 12px; padding: 12px 30px; color: #FFFFFF; font-size: 58px; font-weight: 700; letter-spacing: 1px; }
+
+  .mock-menu { position: absolute; width: 540px; background: rgba(246,243,236,0.99); border-radius: 14px; box-shadow: 0 34px 90px -40px rgba(17,19,22,0.75); padding: 10px 0; color: var(--ink); font-size: 19px; }
+  .mock-menu .hdr { padding: 8px 20px 12px; }
+  .mock-menu .hdr b { display: block; font-size: 21px; font-weight: 700; }
+  .mock-menu .hdr span { font-size: 15px; color: rgba(27,29,33,0.6); }
+  .mock-menu .sep { height: 1px; background: rgba(27,29,33,0.15); margin: 9px 0; }
+  .mock-menu .it { display: flex; align-items: center; gap: 12px; padding: 7px 20px; line-height: 1.35; }
+  .mock-menu .it .tick { width: 20px; color: var(--copper); font-weight: 700; }
+  .mock-menu .it .sc { margin-left: auto; font-family: var(--mono); font-size: 14px; color: rgba(27,29,33,0.5); }
+  .mock-menu .it.cur { font-weight: 700; }
+  .mock-menu .it.hl { background: rgba(200,98,58,0.18); }
+
+  .legend { position: absolute; display: grid; gap: 20px; }
+  .legend .row { display: grid; grid-template-columns: 30px 1fr; gap: 16px; align-items: start; }
+  .legend .dot { width: 26px; height: 26px; border-radius: 50%; background: var(--copper); color: var(--white); font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 4px; }
+  .legend h4 { margin: 0; font-size: 21px; font-weight: 600; color: var(--ink); }
+  .legend p { margin: 6px 0 0; font-size: 17px; line-height: 1.45; color: rgba(27,29,33,0.78); }
+</style>
+</head>
+<body>
+<div id="frame"><div id="stage">
+<!-- ============================ 01 COVER ============================ -->
+<section class="slide cover has-photo dark">
+  <svg class="dots" width="1920" height="1080" aria-hidden="true">
+    <defs><pattern id="cvr-diag" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M0 40 L40 0" stroke="#F6F3EC" stroke-width="0.5" /></pattern></defs>
+    <rect width="1920" height="1080" fill="url(#cvr-diag)" />
+  </svg>
+  <div class="accent"></div>
+  <div class="photo"><img src="{{COVER_WORKSPACE}}" alt="" /></div>
+  <div class="eyebrow">BikS2013 · project notes</div>
+  <h1>Your desktops<br />have names<br /><span>now.</span></h1>
+  <div class="sub">Jumpee is a small macOS menu bar app that names your Mission Control desktops, jumps you between them from the keyboard, and prints the name of the one you are on straight onto the wallpaper.</div>
+  <div class="meta">A product tour · what it does, how to install it, how to configure it<br />Version 1.8.0 · September 2026</div>
+  <div class="logo"><img src="{{LOGO_KNOCKOUT}}" alt="BikS2013" /></div>
+</section>
+
+<!-- ============================ 02 WHY ============================ -->
+<section class="slide">
+  <div class="eyebrow">Introduction</div>
+  <div class="title">Mission Control gives you numbers, <em>not names</em>.</div>
+  <div class="rule"></div>
+  <div class="grid g3" style="top:320px">
+    <div class="card">
+      <span class="tag">The symptom</span>
+      <h3>Desktop 3 is a guess</h3>
+      <p>macOS labels spaces Desktop 1, 2, 3 and stops there. Nothing on screen tells you that Desktop 3 holds the mail and Desktop 5 is the build machine.</p>
+    </div>
+    <div class="card">
+      <span class="tag">The gap</span>
+      <h3>Renaming is not a feature</h3>
+      <p>There is no supported way to name a space — no public API, no System Settings switch, no checkbox anywhere in Mission Control.</p>
+    </div>
+    <div class="card">
+      <span class="tag">The friction</span>
+      <h3>Windows land in the wrong place</h3>
+      <p>Sending a window to another desktop means dragging it to the screen edge and waiting, or enabling a Mission Control shortcut most people never touch.</p>
+    </div>
+  </div>
+  <div class="callout" style="top:780px;bottom:auto">Jumpee closes all three. It reads the space you are on, keeps a name against it, and gives you a keyboard route to every other one.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Jumpee · product tour</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 03 WHAT IT IS ============================ -->
+<section class="slide">
+  <div class="eyebrow">Introduction</div>
+  <div class="title">A menu bar app that <em>knows where you are</em>.</div>
+  <div class="rule"></div>
+  <div class="grid g4" style="top:320px">
+    <div class="col">
+      <div class="n">01</div>
+      <h3>Name</h3>
+      <p>Give every desktop a name. Names are stored against the space itself, so they survive reordering in Mission Control.</p>
+    </div>
+    <div class="col">
+      <div class="n">02</div>
+      <h3>Jump</h3>
+      <p>A global hotkey opens the list from anywhere, and number keys jump. <span class="k">⌘J</span>, then <span class="k">3</span>.</p>
+    </div>
+    <div class="col">
+      <div class="n">03</div>
+      <h3>Show</h3>
+      <p>The current desktop's name sits in the menu bar, and a faint watermark prints it on the wallpaper itself.</p>
+    </div>
+    <div class="col">
+      <div class="n">04</div>
+      <h3>Manage</h3>
+      <p>Send the focused window to another desktop, pin a window on top, and keep an eye on the keyboard language.</p>
+    </div>
+  </div>
+  <div class="callout" style="top:780px;bottom:auto">One small native app. No dock icon, no main window, no account, no network. It lives in the menu bar and gets out of the way.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Jumpee · product tour</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 04 DIVIDER 01 ============================ -->
+<section class="slide divider-dark dark">
+  <div class="bar"></div>
+  <div class="photo"><img src="{{DIVIDER_EVERYDAY_DESK}}" alt="" /></div>
+  <div class="num">01</div>
+  <div class="label">What it does</div>
+  <div class="cap">Naming and jumping, the wallpaper watermark, and the three window-and-keyboard features that grew out of them.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_KNOCKOUT}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 05 MENU BAR ============================ -->
+<section class="slide">
+  <div class="eyebrow">01 · The menu bar</div>
+  <div class="title">The name of the desktop you are on, always in sight.</div>
+  <div class="rule"></div>
+  <div class="mock" style="top:320px;left:90px;width:1740px;height:400px">
+    <div class="bar">
+      <span class="sym">Finder</span>
+      <span>File</span><span>Edit</span><span>View</span>
+      <span class="right">
+        <span class="item">▣&nbsp;Development</span>
+        <span>Mon 14 Sep</span>
+        <span>09:41</span>
+      </span>
+    </div>
+    <div class="screen">
+      <svg class="grid-lines" width="1740" height="354" aria-hidden="true">
+        <defs><pattern id="mock-diag" width="44" height="44" patternUnits="userSpaceOnUse"><path d="M0 44 L44 0" stroke="#F6F3EC" stroke-width="0.6" /></pattern></defs>
+        <rect width="1740" height="354" fill="url(#mock-diag)" />
+      </svg>
+      <div class="wm" style="top:120px;color:#FF0000;opacity:.38">DEVELOPMENT</div>
+    </div>
+  </div>
+  <div class="callout" style="top:770px;bottom:auto">The status item carries the system display symbol and the current space's name. <strong>Settings › General</strong> decides whether the desktop number comes along — <span class="k">4: Browser</span> or just <span class="k">Browser</span>. Unnamed desktops still read <span class="k">Desktop 2</span>. The mock above shows the watermark at 35% opacity for legibility; the shipped default is 15%.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 06 THE DROPDOWN ============================ -->
+<section class="slide">
+  <div class="eyebrow">01 · The list</div>
+  <div class="title">Every desktop on this display, one click away.</div>
+  <div class="rule"></div>
+  <div class="mock-menu" style="top:330px;left:90px">
+    <div class="hdr"><b>Development</b><span>Desktop 2 · Built-in Retina Display</span></div>
+    <div class="sep"></div>
+    <div class="it"><span class="tick"></span>1 · Mail &amp; Calendar<span class="sc">⌘1</span></div>
+    <div class="it cur"><span class="tick">✓</span>2 · Development<span class="sc">⌘2</span></div>
+    <div class="it"><span class="tick"></span>3 · Terminal<span class="sc">⌘3</span></div>
+    <div class="it"><span class="tick"></span>4 · Browser<span class="sc">⌘4</span></div>
+    <div class="sep"></div>
+    <div class="it"><span class="tick"></span>Move Window To…<span class="sc">▸</span></div>
+    <div class="it"><span class="tick"></span>Pin Window on Top<span class="sc">⌃⌘P</span></div>
+    <div class="sep"></div>
+    <div class="it"><span class="tick"></span>Rename Current Desktop…<span class="sc">⌘N</span></div>
+    <div class="it"><span class="tick"></span>Settings…<span class="sc">⌘,</span></div>
+    <div class="it"><span class="tick"></span>About Jumpee</div>
+    <div class="it"><span class="tick"></span>Quit Jumpee<span class="sc">⌘Q</span></div>
+  </div>
+  <div class="legend" style="top:340px;left:760px;width:1070px">
+    <div class="row"><div class="dot">1</div><div><h4>Current desktop as a heading</h4><p>The same context the menu bar shows, repeated where you are already looking — name, desktop number and display.</p></div></div>
+    <div class="row"><div class="dot">2</div><div><h4>The desktops themselves</h4><p>Only the active display's spaces, numbered as that display numbers them. A tick marks where you are; clicking any other one jumps straight there.</p></div></div>
+    <div class="row"><div class="dot">3</div><div><h4>The window actions</h4><p>Move the focused window to another desktop, or pin it above everything else. Both are described later in this section.</p></div></div>
+    <div class="row"><div class="dot">4</div><div><h4>Desktop and app commands</h4><p>Rename, Settings, About and Quit. Persistent preferences deliberately live in Settings, not in this menu.</p></div></div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 07 KEYBOARD ============================ -->
+<section class="slide">
+  <div class="eyebrow">01 · The keyboard</div>
+  <div class="title">Everything is reachable <em>without the mouse</em>.</div>
+  <div class="rule"></div>
+  <table class="t" style="top:320px">
+    <thead>
+      <tr><th style="width:520px">Action</th><th style="width:420px">Key</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Open the desktop list</td><td><span class="kbd">⌘J</span></td><td>Global — works from any app. Configurable in Settings › Shortcuts.</td></tr>
+      <tr><td>Jump to a desktop</td><td><span class="kbd">⌘1</span> … <span class="kbd">⌘9</span></td><td>While the list is open. Numbers follow the active display.</td></tr>
+      <tr><td>Move the focused window</td><td><span class="kbd">⇧⌘1</span> … <span class="kbd">⇧⌘9</span></td><td>While the list is open; also the Move Window To… submenu.</td></tr>
+      <tr><td>Pin or unpin a window</td><td><span class="kbd">⌃⌘P</span></td><td>Global toggle. Present only when Pin windows on top is enabled.</td></tr>
+      <tr><td>Rename this desktop</td><td><span class="kbd">⌘N</span></td><td>Renames the desktop you are on.</td></tr>
+      <tr><td>Open Settings</td><td><span class="kbd">⌘,</span></td><td>The standard macOS shortcut.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout" style="top:830px;bottom:auto">The two global hotkeys are yours to reassign. One word of warning from the project's own notes: the move-window default <span class="k">⌘M</span> collides with the system Minimize command, so change it to <span class="k">⇧⌘M</span> in Settings › Shortcuts.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 08 RENAME ============================ -->
+<section class="slide">
+  <div class="eyebrow">01 · Naming</div>
+  <div class="title">Type a name. It sticks to the space, <em>not the position</em>.</div>
+  <div class="rule"></div>
+  <div class="grid g2" style="top:320px">
+    <div>
+      <p class="lead">macOS identifies a space by a stable internal ID. Jumpee stores your name against that ID — so when you drag desktops around in Mission Control, the names travel with what is actually on them.</p>
+      <ul style="font-size:19px;line-height:1.6;color:rgba(27,29,33,0.8);padding-left:24px;margin-top:26px">
+        <li><strong>Return</strong> renames, <strong>Escape</strong> cancels — a focused panel, not a stacked alert.</li>
+        <li><strong>Remove Name</strong> clears a desktop back to <span class="k">Desktop 2</span>.</li>
+        <li>Renaming applies to the desktop you are on right now.</li>
+        <li>Names are written to the config file the moment you confirm.</li>
+      </ul>
+    </div>
+    <div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="padding:26px 30px 0;font-size:21px;font-weight:700">Rename Desktop</div>
+        <div style="padding:8px 30px 0;font-size:15px;color:rgba(27,29,33,0.6)">Desktop 2 · Built-in Retina Display</div>
+        <div style="margin:22px 30px 0;padding:12px 16px;border:2px solid var(--copper);border-radius:9px;font-size:21px">Development<span style="color:var(--copper)">|</span></div>
+        <div style="display:flex;gap:12px;justify-content:flex-end;padding:22px 30px 26px">
+          <span style="padding:9px 22px;border-radius:8px;background:rgba(27,29,33,0.08);font-size:17px">Cancel</span>
+          <span style="padding:9px 22px;border-radius:8px;background:var(--copper);color:#fff;font-weight:600;font-size:17px">Rename</span>
+        </div>
+        <div style="border-top:1px solid rgba(27,29,33,0.14);padding:15px 30px;font-size:17px;color:var(--copper);font-weight:600">Remove Name</div>
+      </div>
+      <p style="margin:22px 0 0;font-size:16px;line-height:1.5;color:rgba(27,29,33,0.6)">The rename panel, as it appears over your current desktop.</p>
+    </div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 09 WATERMARK ============================ -->
+<section class="slide">
+  <div class="eyebrow">01 · The wallpaper</div>
+  <div class="title">The name, printed faintly <em>on the desktop itself</em>.</div>
+  <div class="rule"></div>
+  <div class="mock" style="top:330px;left:90px;width:1040px;height:390px">
+    <div class="bar">
+      <span class="sym">Finder</span><span>File</span><span>Edit</span>
+      <span class="right"><span class="item">▣&nbsp;Development</span><span>09:41</span></span>
+    </div>
+    <div class="screen">
+      <svg class="grid-lines" width="1040" height="344" aria-hidden="true">
+        <defs><pattern id="wm-diag" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M0 40 L40 0" stroke="#F6F3EC" stroke-width="0.6" /></pattern></defs>
+        <rect width="1040" height="344" fill="url(#wm-diag)" />
+      </svg>
+      <div class="wm" style="top:210px;color:#FF0000;opacity:.38;font-size:64px">DEVELOPMENT</div>
+    </div>
+  </div>
+  <div class="legend" style="top:340px;left:1200px;width:630px">
+    <div class="row"><div class="dot">1</div><div><h4>Seven anchors</h4><p>Any corner, top or bottom centre, or dead centre of the screen.</p></div></div>
+    <div class="row"><div class="dot">2</div><div><h4>Opacity and colour</h4><p>Default is a 15% red. 10–20% reads as a watermark; 30–50% is meant to be noticed.</p></div></div>
+    <div class="row"><div class="dot">3</div><div><h4>Font, size and weight</h4><p>Any installed font, from ultralight to black, plus a margin from the screen edge.</p></div></div>
+    <div class="row"><div class="dot">4</div><div><h4>Click-through</h4><p>The overlay never takes a click and never appears in screenshots of your other windows.</p></div></div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 10 MOVE WINDOW ============================ -->
+<section class="slide">
+  <div class="eyebrow">01 · Windows</div>
+  <div class="title">Send the front window to another desktop — <em>without dragging</em>.</div>
+  <div class="rule"></div>
+  <div class="steps" style="top:330px">
+    <div class="step"><div class="n">1</div><div><h3>Focus the window you want to move</h3><p>Click it once. Jumpee always acts on the frontmost window of the frontmost app.</p></div></div>
+    <div class="step"><div class="n">2</div><div><h3>Open Jumpee and pick Move Window To…</h3><p>From the dropdown, from the submenu, or with <span class="k">⇧⌘1</span>–<span class="k">⇧⌘9</span> while the list is open. A global hotkey can open the same list at your cursor.</p></div></div>
+    <div class="step"><div class="n">3</div><div><h3>Pick the destination</h3><p>The window moves and your view follows it. The current desktop is left out of the list — you cannot move a window onto the desktop you are already on.</p></div></div>
+  </div>
+  <div class="callout warn" style="top:790px;bottom:auto"><strong>Two things to know.</strong> The system's <em>Move window to Desktop N</em> shortcuts must be enabled first — Jumpee reports their status in Settings › Advanced. And on macOS 15 and later the move always brings you along: "move without following" is a platform limitation, not a setting. Windows that cannot move — fullscreen, or assigned to all desktops — are simply left alone.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 11 PIN ============================ -->
+<section class="slide">
+  <div class="eyebrow">01 · Windows</div>
+  <div class="title">Keep one window <em>above all the others</em>.</div>
+  <div class="rule"></div>
+  <div class="grid g2" style="top:320px">
+    <div>
+      <p class="lead">Focus a window, press the pin shortcut, and it stays floating above everything else — including windows belonging to other apps.</p>
+      <ul style="font-size:19px;line-height:1.6;color:rgba(27,29,33,0.8);padding-left:24px;margin-top:26px">
+        <li>Press <span class="k">⌃⌘P</span> again on the same window to unpin it.</li>
+        <li>Several windows, from different apps, can be pinned at once.</li>
+        <li>The menu item changes with the focused window: <em>Pin Window on Top</em> or <em>Unpin Window</em>.</li>
+        <li>Pin state lives in memory only — quitting Jumpee releases every window it was holding.</li>
+      </ul>
+    </div>
+    <div>
+      <div class="mock" style="position:relative;width:100%;height:360px">
+        <div class="bar">
+          <span class="sym">Finder</span><span>File</span><span>Edit</span>
+          <span class="right"><span class="item">▣&nbsp;Development</span><span>09:41</span></span>
+        </div>
+        <div class="screen">
+          <div style="position:absolute;left:58px;top:56px;width:300px;height:110px;border-radius:12px;background:rgba(246,243,236,0.09)"></div>
+          <div style="position:absolute;right:64px;top:150px;width:330px;height:130px;border-radius:12px;background:rgba(246,243,236,0.09)"></div>
+          <div style="position:absolute;left:136px;top:108px;width:530px;height:186px;border-radius:14px;background:var(--paper);box-shadow:0 26px 60px -18px rgba(0,0,0,0.75)">
+            <div style="display:flex;align-items:center;gap:12px;padding:13px 20px;border-bottom:1px solid rgba(27,29,33,0.14)">
+              <span style="font-family:var(--mono);font-size:12px;letter-spacing:2px;color:var(--copper);font-weight:600">PINNED</span>
+              <span style="font-size:15px;font-weight:600;color:var(--ink)">Stays on top of every other window</span>
+            </div>
+            <div style="padding:22px 20px;font-size:14px;color:rgba(27,29,33,0.5);line-height:1.6">The window keeps working normally — it simply never falls behind another app again.</div>
+          </div>
+        </div>
+      </div>
+      <p style="margin:20px 0 0;font-size:16px;line-height:1.5;color:rgba(27,29,33,0.6)">Two unpinned windows behind, one pinned window holding the front.</p>
+    </div>
+  </div>
+  <div class="callout warn" style="top:830px;bottom:auto">Pinning is the one feature that needs <strong>Screen Recording</strong> permission, because the app works from a captured image of the window. Jumpee asks the first time you pin, and takes you to the right pane.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 12 INPUT SOURCE ============================ -->
+<section class="slide">
+  <div class="eyebrow">01 · The keyboard language</div>
+  <div class="title">See the keyboard language <em>without hunting for it</em>.</div>
+  <div class="rule"></div>
+  <div class="mock" style="top:330px;left:90px;width:1000px;height:380px">
+    <div class="bar">
+      <span class="sym">Finder</span><span>File</span><span>Edit</span>
+      <span class="right"><span class="item">▣&nbsp;Development</span><span>09:41</span></span>
+    </div>
+    <div class="screen">
+      <svg class="grid-lines" width="1000" height="334" aria-hidden="true">
+        <defs><pattern id="isi-diag" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M0 40 L40 0" stroke="#F6F3EC" stroke-width="0.6" /></pattern></defs>
+        <rect width="1000" height="334" fill="url(#isi-diag)" />
+      </svg>
+      <div class="isi" style="top:52px;font-size:52px">Greek</div>
+    </div>
+  </div>
+  <div class="legend" style="top:340px;left:1160px;width:670px">
+    <div class="row"><div class="dot">1</div><div><h4>Just below the menu bar</h4><p>Centred, notch-aware, on whichever display holds the space you are on.</p></div></div>
+    <div class="row"><div class="dot">2</div><div><h4>Changes the instant you switch</h4><p>No polling — it listens for the system's input-source notification. Duplicate notices are ignored.</p></div></div>
+    <div class="row"><div class="dot">3</div><div><h4>No new permissions</h4><p>The keyboard input-source APIs need nothing beyond what Jumpee already holds.</p></div></div>
+    <div class="row"><div class="dot">4</div><div><h4>Independent of the watermark</h4><p>Text size, font, weight, colour, opacity, the background pill — and it runs happily alongside the desktop name.</p></div></div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 13 DIVIDER 02 ============================ -->
+<section class="slide divider-bright">
+  <div class="accent"></div>
+  <div class="photo"><img src="{{DIVIDER_TWO_DISPLAYS}}" alt="" /></div>
+  <div class="eyebrow">Section 02</div>
+  <div class="num">02</div>
+  <div class="label">More than one display</div>
+  <div class="cap">What changes when there is a second screen, and why the numbering stays local to each display.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 02</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 14 MULTI-DISPLAY ============================ -->
+<section class="slide">
+  <div class="eyebrow">02 · Displays</div>
+  <div class="title">Each display keeps <em>its own set of desktops</em>.</div>
+  <div class="rule"></div>
+  <div class="kv" style="top:330px">
+    <div class="row"><div class="key">The list</div><div class="val">Shows only the spaces belonging to the display you are working on — not a flattened list of everything.</div></div>
+    <div class="row"><div class="key">The numbers</div><div class="val"><span class="k">⌘1</span>–<span class="k">⌘9</span> follow that display's own numbering, starting at 1 on each screen.</div></div>
+    <div class="row"><div class="key">The watermark</div><div class="val">Appears on the display holding the active space, and repositions when you move to the other one.</div></div>
+    <div class="row"><div class="key">The indicator</div><div class="val">Same rule — the keyboard language follows the active display, with the menu bar height measured per screen so notched and external displays both sit correctly.</div></div>
+    <div class="row"><div class="key">Plugging in</div><div class="val">Connecting or disconnecting a display rebuilds the menu and the overlays for the new layout. Nothing restarts.</div></div>
+  </div>
+  <div class="callout" style="top:800px;bottom:auto">Window moves respect the same topology: a window is sent to a desktop on the active display, using the global numbering the system shortcuts expect.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 02</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 15 DIVIDER 03 ============================ -->
+<section class="slide divider-dark dark">
+  <div class="bar"></div>
+  <div class="photo"><img src="{{DIVIDER_UNBOXING}}" alt="" /></div>
+  <div class="num">03</div>
+  <div class="label">Installing it</div>
+  <div class="cap">One Homebrew line or a disk image — then two settings macOS will not let Jumpee change on its own.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_KNOCKOUT}}" alt="BikS2013" /><span>Section 03</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 16 INSTALL ============================ -->
+<section class="slide">
+  <div class="eyebrow">03 · Install</div>
+  <div class="title">One line, if you use Homebrew.</div>
+  <div class="rule"></div>
+  <pre class="code" style="top:330px;left:90px;width:880px"><span class="c"># add the tap, then install the cask</span>
+brew tap BikS2013/jumpee
+brew install --cask jumpee
+
+<span class="c"># launch it</span>
+open -a Jumpee
+
+<span class="c"># and when you want it gone</span>
+brew uninstall --cask jumpee</pre>
+  <div class="legend" style="top:340px;left:1050px;width:780px">
+    <div class="row"><div class="dot">1</div><div><h4>Or download a release</h4><p>A <span class="k">.dmg</span> to drag onto Applications, or a <span class="k">.zip</span> to unpack. Both are on the project's releases page.</p></div></div>
+    <div class="row"><div class="dot">2</div><div><h4>Signed and notarized</h4><p>From v1.6.0 every release is Developer ID signed, checked by Apple and stapled — so Gatekeeper opens it without a warning. Only v1.5.1 and older need the quarantine flag cleared.</p></div></div>
+    <div class="row"><div class="dot">3</div><div><h4>macOS 13 or later</h4><p>Ventura, Sonoma, Sequoia and Tahoe. One universal download covers Apple silicon and Intel.</p></div></div>
+    <div class="row"><div class="dot">4</div><div><h4>No dependencies</h4><p>A single native Swift binary. Building it yourself needs only the Xcode Command Line Tools — no full Xcode.</p></div></div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 03</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 17 SETUP 1 ACCESSIBILITY ============================ -->
+<section class="slide">
+  <div class="eyebrow">03 · Setup 1 of 3</div>
+  <div class="title">Grant Accessibility. <em>Nothing switches without it.</em></div>
+  <div class="rule"></div>
+  <div class="grid g2" style="top:320px">
+    <div>
+      <p class="lead">Jumpee never reaches into another app. To change desktop, it asks macOS to run the system's own shortcut — and synthesising that keystroke sits behind Accessibility, which macOS will not let an app grant to itself.</p>
+      <div class="steps" style="position:static;margin-top:30px;gap:18px">
+        <div class="step"><div class="n">1</div><div><h3>Open the pane</h3><p>System Settings › Privacy &amp; Security › Accessibility.</p></div></div>
+        <div class="step"><div class="n">2</div><div><h3>Switch Jumpee on</h3><p>If it is not listed, click <span class="k">+</span> and add <span class="k">/Applications/Jumpee.app</span>.</p></div></div>
+        <div class="step"><div class="n">3</div><div><h3>Or follow the prompt</h3><p>Jumpee asks on first launch and takes you straight there.</p></div></div>
+      </div>
+    </div>
+    <div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="padding:20px 26px;border-bottom:1px solid rgba(27,29,33,0.14);font-size:16px;font-weight:600">Privacy &amp; Security › Accessibility</div>
+        <div style="display:flex;align-items:center;gap:16px;padding:18px 26px;border-bottom:1px solid rgba(27,29,33,0.1)">
+          <span style="width:34px;height:34px;border-radius:8px;background:var(--ink);color:var(--copper-light);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px">J</span>
+          <span style="font-size:18px;font-weight:600">Jumpee</span>
+          <span style="margin-left:auto;width:52px;height:30px;border-radius:15px;background:var(--copper);display:flex;align-items:center;justify-content:flex-end;padding:3px"><span style="width:24px;height:24px;border-radius:50%;background:#fff;display:block"></span></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;padding:18px 26px;opacity:.5">
+          <span style="width:34px;height:34px;border-radius:8px;background:rgba(27,29,33,0.15);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px">T</span>
+          <span style="font-size:18px">Terminal</span>
+          <span style="margin-left:auto;width:52px;height:30px;border-radius:15px;background:rgba(27,29,33,0.2);display:flex;align-items:center;padding:3px"><span style="width:24px;height:24px;border-radius:50%;background:#fff;display:block"></span></span>
+        </div>
+      </div>
+      <p style="margin:20px 0 0;font-size:16px;line-height:1.5;color:rgba(27,29,33,0.6)">Switching desktops and moving windows both need this one permission.</p>
+    </div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 03</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 18 SETUP 2 SHORTCUTS ============================ -->
+<section class="slide">
+  <div class="eyebrow">03 · Setup 2 of 3</div>
+  <div class="title">Turn on <em>Switch to Desktop 1–9</em>.</div>
+  <div class="rule"></div>
+  <div class="grid g2" style="top:320px">
+    <div>
+      <p class="lead">There is no public API for changing desktop. Jumpee presses macOS's own <span class="k">⌃1</span>…<span class="k">⌃9</span> shortcuts — and those ship switched off.</p>
+      <div class="steps" style="position:static;margin-top:28px;gap:16px">
+        <div class="step"><div class="n">1</div><div><h3>Open the shortcut list</h3><p>System Settings › Keyboard › Keyboard Shortcuts › Mission Control.</p></div></div>
+        <div class="step"><div class="n">2</div><div><h3>Tick the desktop shortcuts</h3><p>Switch to Desktop 1 through Switch to Desktop 9.</p></div></div>
+        <div class="step"><div class="n">3</div><div><h3>Leave them alone afterwards</h3><p>Changing them to another key breaks navigation — Jumpee expects the system defaults.</p></div></div>
+      </div>
+    </div>
+    <div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="padding:20px 26px;border-bottom:1px solid rgba(27,29,33,0.14);font-size:16px;font-weight:600">Keyboard Shortcuts › Mission Control</div>
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:16px;padding:14px 26px;align-items:center;font-size:17px;border-bottom:1px solid rgba(27,29,33,0.1)"><span>Switch to Desktop 1</span><span class="k">⌃1</span><span style="color:var(--copper);font-weight:700">✓</span></div>
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:16px;padding:14px 26px;align-items:center;font-size:17px;border-bottom:1px solid rgba(27,29,33,0.1)"><span>Switch to Desktop 2</span><span class="k">⌃2</span><span style="color:var(--copper);font-weight:700">✓</span></div>
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:16px;padding:14px 26px;align-items:center;font-size:17px;border-bottom:1px solid rgba(27,29,33,0.1)"><span>Switch to Desktop 3</span><span class="k">⌃3</span><span style="color:var(--copper);font-weight:700">✓</span></div>
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:16px;padding:14px 26px;align-items:center;font-size:17px;opacity:.45"><span>Switch to Desktop 4</span><span class="k">⌃4</span><span>—</span></div>
+      </div>
+      <p style="margin:20px 0 0;font-size:16px;line-height:1.5;color:rgba(27,29,33,0.6)">Skip these and the list still draws correctly — but clicking a desktop goes nowhere.</p>
+    </div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 03</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 19 SETUP 3 ============================ -->
+<section class="slide">
+  <div class="eyebrow">03 · Setup 3 of 3</div>
+  <div class="title">Screen Recording is only for pinning.</div>
+  <div class="rule"></div>
+  <div class="grid g2" style="top:320px">
+    <div class="card">
+      <span class="tag">Required — for pinning only</span>
+      <h3>Screen Recording</h3>
+      <p>Pinning works from a captured image of the window, so macOS gates it behind Screen Recording. Leave it off and everything else still works; the first time you pin, Jumpee asks and opens the pane for you.</p>
+      <p class="muted" style="font-size:17px;margin-top:16px">System Settings › Privacy &amp; Security › Screen Recording</p>
+    </div>
+    <div class="card tint">
+      <span class="tag">Optional</span>
+      <h3>Launch at login</h3>
+      <p>Jumpee does not install itself as a login item. If you want it waiting at every start, add it yourself — it is one toggle in System Settings › General › Login Items.</p>
+      <p class="muted" style="font-size:17px;margin-top:16px">Until then, start it from Spotlight whenever you want it.</p>
+    </div>
+  </div>
+  <div class="callout" style="top:800px;bottom:auto">The whole setup in one line: <strong>one permission</strong> for naming, switching and the overlays, <strong>a second</strong> only for pinning, and <strong>one set of system shortcuts</strong> that macOS keeps switched off by default.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 03</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 20 DIVIDER 04 ============================ -->
+<section class="slide divider-bright">
+  <div class="accent"></div>
+  <div class="photo"><img src="{{DIVIDER_CONTROLS}}" alt="" /></div>
+  <div class="eyebrow">Section 04</div>
+  <div class="num">04</div>
+  <div class="label">Settings and configuration</div>
+  <div class="cap">Four panes in a real macOS Settings window, one JSON file underneath, and no Apply button anywhere.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 04</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 21 SETTINGS WINDOW ============================ -->
+<section class="slide">
+  <div class="eyebrow">04 · Settings</div>
+  <div class="title">A real macOS Settings window — <em>four panes</em>.</div>
+  <div class="rule"></div>
+  <div class="grid g4" style="top:330px">
+    <div class="card">
+      <span class="tag">Pane 01</span>
+      <h3>General</h3>
+      <p>Which features exist at all: the menu bar icon, the desktop number, overlay, indicator, window moving and pinning.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Pane 02</span>
+      <h3>Appearance</h3>
+      <p>How the two overlays look — type, colour, opacity, anchor — with a live preview beside the controls.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Pane 03</span>
+      <h3>Shortcuts</h3>
+      <p>Three global hotkeys, recorded by pressing them, with conflict checking and a reset on every row.</p>
+    </div>
+    <div class="card">
+      <span class="tag">Pane 04</span>
+      <h3>Advanced</h3>
+      <p>Permission status, the config file in Finder, and Reload Now for edits made by hand.</p>
+    </div>
+  </div>
+  <div class="callout" style="top:780px;bottom:auto"><strong>No Apply button.</strong> Every control writes straight through to the configuration and takes effect immediately. The window resizes and retitles itself to match the pane you pick, and <span class="k">⌘,</span> opens it from anywhere.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 04</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 22 GENERAL ============================ -->
+<section class="slide">
+  <div class="eyebrow">04 · General</div>
+  <div class="title">General decides what exists.</div>
+  <div class="rule"></div>
+  <div class="kv" style="top:320px">
+    <div class="row"><div class="key">Menu bar icon</div><div class="val">Hide the status item and keep the hotkeys. With the icon hidden, the list opens at the cursor instead.</div></div>
+    <div class="row"><div class="key">Desktop number</div><div class="val"><span class="k">4: Browser</span> or just <span class="k">Browser</span> — your choice, everywhere the name appears.</div></div>
+    <div class="row"><div class="key">Dropdown at cursor</div><div class="val">Open the list where the pointer happens to be, or at the menu bar item. Cursor is the default.</div></div>
+    <div class="row"><div class="key">Desktop overlay</div><div class="val">The wallpaper watermark, on or off.</div></div>
+    <div class="row"><div class="key">Input source indicator</div><div class="val">The keyboard-language overlay, on or off.</div></div>
+    <div class="row"><div class="key">Move windows / Pin windows on top</div><div class="val">Each feature brings its own menu entries and its own hotkey — and takes them away again when switched off.</div></div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 04</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 23 APPEARANCE ============================ -->
+<section class="slide">
+  <div class="eyebrow">04 · Appearance</div>
+  <div class="title">Appearance, <em>with a live preview</em>.</div>
+  <div class="rule"></div>
+  <div class="grid g2" style="top:320px">
+    <div>
+      <div class="kv" style="position:static">
+        <div class="row" style="grid-template-columns:260px 1fr"><div class="key">Watermark</div><div class="val">Font, size, weight, text colour, opacity, anchor and margin from the edge.</div></div>
+        <div class="row" style="grid-template-columns:260px 1fr"><div class="key">Indicator text</div><div class="val">Size, font, weight, colour, opacity and a vertical offset below the menu bar.</div></div>
+        <div class="row" style="grid-template-columns:260px 1fr"><div class="key">Indicator pill</div><div class="val">Background colour, background opacity and corner radius.</div></div>
+        <div class="row" style="grid-template-columns:260px 1fr"><div class="key">Restore defaults</div><div class="val">Resets the visuals but keeps each feature's on/off state — and keeps your per-language labels.</div></div>
+      </div>
+    </div>
+    <div>
+      <div class="mock" style="position:relative;width:100%;height:330px">
+        <div class="bar">
+          <span class="sym">Finder</span><span>File</span>
+          <span class="right"><span class="item">▣&nbsp;Terminal</span><span>09:41</span></span>
+        </div>
+        <div class="screen">
+          <div class="wm" style="top:40px;color:#E3A64A;opacity:.5;font-size:52px;letter-spacing:1px">TERMINAL</div>
+          <div class="isi" style="top:180px;font-size:40px">U.S.</div>
+        </div>
+      </div>
+      <p style="margin:20px 0 0;font-size:16px;line-height:1.5;color:rgba(27,29,33,0.6)">Both overlays in one preview — the watermark and the input-source pill, styled independently.</p>
+    </div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 04</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 24 SHORTCUTS ============================ -->
+<section class="slide">
+  <div class="eyebrow">04 · Shortcuts</div>
+  <div class="title">Record a shortcut <em>by pressing it</em>.</div>
+  <div class="rule"></div>
+  <div class="grid g2" style="top:320px">
+    <div>
+      <p class="lead">No checkbox-and-text-field fiddling. Click the control, press the chord you want, and it is captured whole — modifiers and all, including named keys like Space, Return, Tab and Escape.</p>
+      <ul style="font-size:19px;line-height:1.6;color:rgba(27,29,33,0.8);padding-left:24px;margin-top:26px">
+        <li><strong>Escape</strong> with no modifiers cancels recording.</li>
+        <li>A shortcut needs at least one modifier, a key from the supported set, and no clash with the other two.</li>
+        <li>Applying it re-registers the hotkey immediately — no restart, no manual reload.</li>
+        <li>Every row has its own reset, and there is one <em>Restore Defaults</em> for all three.</li>
+        <li>Rows for disabled features stay visible, greyed out, so you can see what is available.</li>
+      </ul>
+    </div>
+    <div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="padding:18px 26px;border-bottom:1px solid rgba(27,29,33,0.14);font-size:16px;font-weight:600">Shortcuts</div>
+        <div style="display:grid;grid-template-columns:1fr auto 62px;gap:16px;padding:17px 26px;align-items:center;border-bottom:1px solid rgba(27,29,33,0.1)">
+          <span style="font-size:18px">Open Jumpee</span><span class="kbd">⌘ J</span><span style="font-size:14px;color:var(--copper);font-weight:600;text-align:right">Reset</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr auto 62px;gap:16px;padding:17px 26px;align-items:center;border-bottom:1px solid rgba(27,29,33,0.1);background:rgba(200,98,58,0.07)">
+          <span style="font-size:18px">Move Current Window</span><span style="padding:5px 12px;border:2px solid var(--copper);border-radius:7px;font-family:var(--mono);font-size:15px;color:var(--copper);white-space:nowrap">Recording…</span><span style="font-size:14px;color:var(--copper);font-weight:600;text-align:right">Reset</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr auto 62px;gap:16px;padding:17px 26px;align-items:center;opacity:.45">
+          <span style="font-size:18px">Pin or Unpin Window</span><span class="kbd">⌃ ⌘ P</span><span style="font-size:14px;text-align:right">Reset</span>
+        </div>
+      </div>
+      <p style="margin:20px 0 0;font-size:16px;line-height:1.5;color:rgba(27,29,33,0.6)">The third row is greyed out because Pin windows on top is switched off in General.</p>
+    </div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 04</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 25 ADVANCED ============================ -->
+<section class="slide">
+  <div class="eyebrow">04 · Advanced</div>
+  <div class="title">Advanced tells you what macOS is holding back.</div>
+  <div class="rule"></div>
+  <div class="grid g2" style="top:330px">
+    <div class="card">
+      <span class="tag">Status</span>
+      <h3>Three checks, one screen</h3>
+      <ul>
+        <li><strong>Accessibility</strong> — granted or not, with a way through to the pane.</li>
+        <li><strong>Mission Control shortcuts</strong> — whether Switch to Desktop 1–9 are detected, plus a <em>Review Shortcuts…</em> button.</li>
+        <li><strong>Screen Recording</strong> — the permission pinning depends on.</li>
+      </ul>
+      <p class="muted" style="font-size:17px">No guessing why a feature is quiet.</p>
+    </div>
+    <div class="card ink">
+      <span class="tag">The file</span>
+      <h3 style="color:var(--paper)">Reveal and reload</h3>
+      <ul>
+        <li><strong>Reveal config file</strong> opens the JSON in Finder.</li>
+        <li><strong>Reload Now</strong> re-reads it and re-registers every hotkey — no restart.</li>
+        <li>Everything the Settings panes do lands in that same file, so hand-edits and UI edits never diverge.</li>
+      </ul>
+      <p style="color:rgba(246,243,236,0.7);font-size:17px">Edited by hand and it did not take? Reload Now is the answer.</p>
+    </div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 04</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 26 CONFIG FILE ============================ -->
+<section class="slide">
+  <div class="eyebrow">04 · Configuration</div>
+  <div class="title">Everything the app knows, in <em>one file</em>.</div>
+  <div class="rule"></div>
+  <pre class="code" style="top:330px;left:90px;width:900px;font-size:17px">{
+  <span class="h">"hotkey"</span>:        { "key": "j", "modifiers": ["command"] },
+  <span class="h">"moveWindow"</span>:    { "enabled": true },
+  <span class="h">"pinWindow"</span>:     { "enabled": true },
+  <span class="h">"overlay"</span>: {
+    "enabled": true, "fontSize": 72, "fontWeight": "bold",
+    "opacity": 0.15, "position": "top-center",
+    "textColor": <span class="g">"#FF0000"</span>, "margin": 40
+  },
+  <span class="h">"showSpaceNumber"</span>: true,
+  <span class="h">"spaces"</span>: { <span class="g">"42"</span>: "Mail &amp; Calendar", <span class="g">"15"</span>: "Development" }
+}</pre>
+  <div class="legend" style="top:340px;left:1070px;width:760px">
+    <div class="row"><div class="dot">1</div><div><h4>~/.tool-agents/jumpee/config.json</h4><p>The folder is created <span class="k">0700</span> and the file <span class="k">0600</span>. It is written for you on first run and it is the only configuration method — no environment variables, no command-line flags.</p></div></div>
+    <div class="row"><div class="dot">2</div><div><h4>Spaces are keyed by ID, not position</h4><p><span class="k">"42"</span> is the space's stable internal ID. That is why names survive a reshuffle — and why you should rename from the menu rather than editing keys by hand.</p></div></div>
+    <div class="row"><div class="dot">3</div><div><h4>Coming from an older build?</h4><p>Legacy configs are migrated automatically — position-keyed spaces to ID-keyed, and the old <span class="k">~/.Jumpee/</span> folder to the new path on first launch.</p></div></div>
+  </div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 04</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 27 DIVIDER 05 ============================ -->
+<section class="slide divider-dark dark">
+  <div class="bar"></div>
+  <div class="photo"><img src="{{DIVIDER_HOME_OFFICE}}" alt="" /></div>
+  <div class="num">05</div>
+  <div class="label">Where it fits</div>
+  <div class="cap">Three working habits it suits, and an honest list of what it still will not do.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_KNOCKOUT}}" alt="BikS2013" /><span>Section 05</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 28 USE CASES ============================ -->
+<section class="slide">
+  <div class="eyebrow">05 · Use cases</div>
+  <div class="title">Three places it <em>earns its keep</em>.</div>
+  <div class="rule"></div>
+  <div class="grid g3" style="top:320px">
+    <div class="card">
+      <span class="tag">01</span>
+      <h3>One machine, four jobs</h3>
+      <p>Comms, development, terminal, browser — four desktops, four names, no memorising. <span class="k">⌘J</span> then the number, from inside any app, without losing your place.</p>
+      <p class="muted" style="font-size:17px">The menu bar answers "where am I?" before you have to ask.</p>
+    </div>
+    <div class="card">
+      <span class="tag">02</span>
+      <h3>Presenting and screen sharing</h3>
+      <p>Your audience sees the space name printed on the desktop you are sharing, and the input-source pill stops the mid-sentence "why is my typing in Greek?" moment before it happens.</p>
+      <p class="muted" style="font-size:17px">Both overlays are click-through, so nothing you demo is blocked.</p>
+    </div>
+    <div class="card">
+      <span class="tag">03</span>
+      <h3>A reference that must not vanish</h3>
+      <p>Pin the document, dashboard or call transcript you are working from above everything else, then edit underneath it. Unpin when you are done — or quit, and Jumpee releases it for you.</p>
+      <p class="muted" style="font-size:17px">Several pinned windows at once, from different apps.</p>
+    </div>
+  </div>
+  <div class="callout" style="top:800px;bottom:auto">It suits anyone who already thinks in desktops but cannot remember what is on each one — and anyone whose work mixes two keyboard languages across two screens.</div>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 05</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 29 LIMITS ============================ -->
+<section class="slide">
+  <div class="eyebrow">05 · Worth knowing</div>
+  <div class="title">What it does <em>not</em> do.</div>
+  <div class="rule"></div>
+  <table class="t compact" style="top:330px">
+    <thead><tr><th style="width:660px">Limit</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Nine desktops per display</td><td>Switching rides on the system's <span class="k">⌃1</span>–<span class="k">⌃9</span> shortcuts, so there is nothing beyond the ninth.</td></tr>
+      <tr><td>Moving a window always follows it</td><td>macOS 15 and later force the view across with the window. Not a setting, a platform rule.</td></tr>
+      <tr><td>Space detection rests on private APIs</td><td>macOS offers no public way to read the current space, so Jumpee uses undocumented CoreGraphics calls. A future release could break them.</td></tr>
+      <tr><td>The watermark shows the current space only</td><td>Printing each name into the Mission Control thumbnails is not reachable on current macOS.</td></tr>
+      <tr><td>Pins are forgotten at quit</td><td>Pin state is kept in memory by design, so nothing is left floating after Jumpee exits.</td></tr>
+      <tr><td>The <span class="k">⌘M</span> default clashes with Minimize</td><td>Change it to <span class="k">⇧⌘M</span> — a known trade-off recorded in the project's own notes.</td></tr>
+    </tbody>
+  </table>
+  <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 05</span></div><span class="pg"></span></div>
+</section>
+
+<!-- ============================ 30 CLOSING ============================ -->
+<section class="slide cover dark">
+  <svg class="dots" width="1920" height="1080" aria-hidden="true">
+    <defs><pattern id="end-diag" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M0 40 L40 0" stroke="#F6F3EC" stroke-width="0.5" /></pattern></defs>
+    <rect width="1920" height="1080" fill="url(#end-diag)" />
+  </svg>
+  <div class="field"></div>
+  <div class="ghost">30</div>
+  <div class="eyebrow">Start here</div>
+  <h1 style="font-size:92px;top:230px">Three steps<br />and you are <span>done.</span></h1>
+  <div style="position:absolute;left:90px;top:560px;right:480px;display:grid;gap:22px">
+    <div class="step"><div class="n" style="background:var(--copper);color:#fff">1</div><div><h3 style="color:var(--paper)">Install it</h3><p style="color:rgba(246,243,236,0.78)"><span class="k">brew install --cask jumpee</span> after tapping the repository, or take the disk image from the releases page.</p></div></div>
+    <div class="step"><div class="n" style="background:var(--copper);color:#fff">2</div><div><h3 style="color:var(--paper)">Grant Accessibility and switch on Desktop 1–9</h3><p style="color:rgba(246,243,236,0.78)">One permission and one set of system shortcuts. Settings › Advanced confirms both.</p></div></div>
+    <div class="step"><div class="n" style="background:var(--copper);color:#fff">3</div><div><h3 style="color:var(--paper)">Name your first desktop</h3><p style="color:rgba(246,243,236,0.78)">Press <span class="k">⌘N</span>, type the name, press Return. The menu bar answers to it from that moment on.</p></div></div>
+  </div>
+  <div class="meta">Jumpee v1.8.0 · macOS 13 or later · universal binary · signed and notarized<br />BikS2013 · project notes · September 2026</div>
+  <div class="logo"><img src="{{LOGO_KNOCKOUT}}" alt="BikS2013" /></div>
+</section>
+
+</div></div>
+<div id="nav"><button id="prev" title="Previous (←)">‹</button><span class="counter" id="counter"></span><button id="next" title="Next (→)">›</button></div>
+<div id="progress"></div>
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var stage = document.getElementById('stage');
+  var counter = document.getElementById('counter');
+  var progress = document.getElementById('progress');
+  var idx = 0;
+
+  // number the footers automatically
+  slides.forEach(function (s, i) {
+    var n = s.querySelector('.footer .pg');
+    if (n && !n.textContent.trim()) n.textContent = String(i + 1).padStart(2, '0');
+  });
+
+  function fit() {
+    var vv = window.visualViewport;
+    var w = vv ? vv.width : window.innerWidth;
+    var h = vv ? vv.height : window.innerHeight;
+    var s = Math.min(w / 1920, h / 1080);
+    var x = Math.round((w - 1920 * s) / 2);
+    var y = Math.round((h - 1080 * s) / 2);
+    stage.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + s + ')';
+  }
+
+  function show(i, push) {
+    idx = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach(function (s, j) { s.classList.toggle('active', j === idx); });
+    counter.textContent = (idx + 1) + ' / ' + slides.length;
+    progress.style.width = ((idx + 1) / slides.length * 100) + '%';
+    if (push !== false) { try { history.replaceState(null, '', '#' + (idx + 1)); } catch (e) {} }
+  }
+  window.showSlide = function (n) { show(n - 1); }; // 1-based, same as the URL hash
+
+  function fromHash() {
+    var n = parseInt((location.hash || '').replace('#', ''), 10);
+    show(isNaN(n) ? 0 : n - 1, false);
+  }
+
+  document.getElementById('prev').addEventListener('click', function () { show(idx - 1); });
+  document.getElementById('next').addEventListener('click', function () { show(idx + 1); });
+  document.addEventListener('keydown', function (e) {
+    if (e.target && (e.target.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName))) return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); show(idx + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); show(idx - 1); }
+    else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(slides.length - 1); }
+  });
+  window.addEventListener('resize', fit);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', fit);
+  window.addEventListener('hashchange', fromHash);
+  // navigation chrome appears on mouse movement and fades when idle
+  var nav = document.getElementById('nav'), navTimer = null;
+  function wake() { nav.classList.add('show'); clearTimeout(navTimer); navTimer = setTimeout(function () { nav.classList.remove('show'); }, 2500); }
+  document.addEventListener('mousemove', wake);
+  nav.addEventListener('mouseenter', function () { clearTimeout(navTimer); });
+  nav.addEventListener('mouseleave', wake);
+  fit();
+  fromHash();
+})();
+</script>
+</body>
+</html>

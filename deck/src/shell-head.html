@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jumpee — name your desktops, then jump between them</title>
+<style>
+  :root {
+    /* BikS2013 theme of the nbg-design skill — ink and copper on warm paper */
+    --ink: #1B1D21;
+    --copper: #C8623A;
+    --copper-light: #E08A5E;
+    --amber: #E3A64A;
+    --black: #111316;
+    --grey-1: #C9CCD1;
+    --grey-2: #6E7379;
+    --paper: #F6F3EC;
+    --white: #FFFFFF;
+    --body: #1B1D21;
+    --sans: "Avenir Next", "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--black); overflow: hidden; font-family: var(--sans); }
+
+  /* ---- viewport frame + scaled 1920x1080 stage ---- */
+  #frame { position: fixed; inset: 0; overflow: hidden; background: var(--black); }
+  #stage { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  .slide { position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--paper); color: var(--body); display: none; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  .slide.active { display: block; }
+
+  /* ---- navigation chrome (outside the slides) ---- */
+  #nav { position: fixed; right: 18px; bottom: 14px; display: flex; gap: 6px; align-items: center; z-index: 50; font-family: var(--sans); opacity: 0; transition: opacity .25s ease; pointer-events: none; }
+  #nav.show { opacity: 1; pointer-events: auto; }
+  #nav button { border: 0; background: rgba(246,243,236,0.10); color: rgba(246,243,236,0.85); width: 34px; height: 34px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+  #nav button:hover { background: rgba(200,98,58,0.35); }
+  #nav .counter { color: rgba(246,243,236,0.6); font-size: 13px; padding: 0 8px; font-variant-numeric: tabular-nums; }
+  #progress { position: fixed; left: 0; bottom: 0; height: 3px; background: var(--copper-light); width: 0; z-index: 50; transition: width .2s ease; }
+
+  /* ---- shared slide primitives (artboard px) ---- */
+  .eyebrow { position: absolute; top: 70px; left: 90px; font-family: var(--mono); font-size: 15px; letter-spacing: 3px; text-transform: uppercase; color: var(--copper); font-weight: 500; }
+  .title { position: absolute; top: 110px; left: 90px; right: 90px; font-size: 56px; font-weight: 300; line-height: 1.05; letter-spacing: -1px; color: var(--ink); text-wrap: balance; }
+  .title em { font-style: italic; font-weight: 400; color: var(--copper); }
+  .rule { position: absolute; top: 290px; left: 90px; width: 120px; height: 0; border-top: 2px dashed var(--copper); }
+  .body { position: absolute; top: 340px; left: 90px; right: 90px; font-size: 22px; line-height: 1.55; color: rgba(27,29,33,0.85); }
+  .body p { margin: 0 0 22px; text-wrap: pretty; }
+  .body ul { margin: 0; padding-left: 26px; }
+  .body li { margin: 0 0 12px; text-wrap: pretty; }
+  .body li::marker { color: var(--copper); }
+  .lead { font-size: 26px; line-height: 1.45; color: var(--ink); }
+  .muted { color: rgba(27,29,33,0.6); }
+  .note { position: absolute; left: 90px; right: 90px; bottom: 110px; font-size: 15px; line-height: 1.4; color: rgba(27,29,33,0.55); }
+  code, .k { font-family: var(--mono); font-size: 0.92em; background: rgba(27,29,33,0.07); color: var(--ink); padding: 2px 7px; border-radius: 5px; white-space: nowrap; }
+  .dark code, .dark .k { background: rgba(255,255,255,0.12); color: var(--paper); }
+  .kbd { display: inline-block; font-family: var(--mono); font-size: 15px; background: var(--ink); color: var(--paper); border-radius: 6px; padding: 4px 10px; margin: 0 3px 0 0; }
+  .card.ink .kbd { background: rgba(255,255,255,0.15); }
+  .kbd.copper { background: var(--copper); color: var(--white); }
+
+  .footer { position: absolute; left: 54px; right: 54px; bottom: 36px; display: flex; align-items: center; justify-content: space-between; color: rgba(27,29,33,0.55); font-size: 18px; letter-spacing: .4px; }
+  .footer .brand { display: flex; align-items: center; gap: 18px; }
+  .footer .brand img { height: 28px; width: auto; display: block; }
+  .footer .brand span { opacity: .7; }
+  .footer .pg { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 500; letter-spacing: 1px; }
+  .dark .footer { color: rgba(255,255,255,0.7); }
+
+  /* ---- layout helpers ---- */
+  .grid { position: absolute; top: 340px; left: 90px; right: 90px; display: grid; gap: 40px; }
+  .grid.g2 { grid-template-columns: repeat(2, 1fr); }
+  .grid.g3 { grid-template-columns: repeat(3, 1fr); }
+  .grid.g4 { grid-template-columns: repeat(4, 1fr); gap: 28px; }
+  .col .n { font-size: 64px; font-weight: 200; color: var(--copper); line-height: 1; letter-spacing: -2px; }
+  .col h3 { margin: 22px 0 0; font-size: 26px; font-weight: 600; color: var(--ink); line-height: 1.2; }
+  .col p { margin: 14px 0 0; font-size: 18px; line-height: 1.55; color: rgba(27,29,33,0.78); text-wrap: pretty; }
+  .col ul { margin: 14px 0 0; padding-left: 22px; font-size: 18px; line-height: 1.5; color: rgba(27,29,33,0.78); }
+  .col li { margin-bottom: 8px; }
+  .col li::marker { color: var(--copper); }
+
+  .card { background: var(--white); border: 1px solid rgba(27,29,33,0.12); border-radius: 16px; padding: 28px 30px; box-shadow: 0 12px 40px -24px rgba(27,29,33,0.25); }
+  .card.tint { background: rgba(27,29,33,0.045); border-color: transparent; box-shadow: none; }
+  .card.ink { background: var(--ink); color: var(--paper); border-color: transparent; }
+  .card.copper { background: var(--copper); color: var(--white); border-color: transparent; box-shadow: none; }
+  .card h3 { margin: 0; font-size: 24px; font-weight: 600; color: var(--ink); line-height: 1.2; }
+  .card.ink h3, .card.copper h3 { color: var(--paper); }
+  .card.copper h3 { color: var(--white); }
+  .card p { margin: 12px 0 0; font-size: 18px; line-height: 1.5; color: rgba(27,29,33,0.8); }
+  .card.ink p, .card.copper p { color: rgba(246,243,236,0.85); }
+  .card.copper p { color: rgba(255,255,255,0.9); }
+  .card ul { margin: 12px 0 0; padding-left: 22px; font-size: 18px; line-height: 1.5; color: rgba(27,29,33,0.8); }
+  .card.ink ul, .card.copper ul { color: rgba(246,243,236,0.85); }
+  .card li { margin-bottom: 8px; }
+  .card li::marker { color: var(--copper); }
+  .card.ink li::marker, .card.copper li::marker { color: var(--copper-light); }
+  .card .tag { display: inline-block; font-family: var(--mono); font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--copper); font-weight: 500; margin-bottom: 10px; }
+  .card.ink .tag { color: var(--copper-light); }
+  .card.copper .tag { color: rgba(255,255,255,0.8); }
+  .card.ink code { background: rgba(255,255,255,0.14); color: var(--paper); }
+  .card.copper code { background: rgba(0,0,0,0.18); color: var(--white); }
+
+  .kv { position: absolute; top: 340px; left: 90px; right: 90px; }
+  .kv .row { display: grid; grid-template-columns: 400px 1fr; gap: 40px; padding: 16px 0; border-bottom: 1px dashed rgba(27,29,33,0.28); font-size: 20px; line-height: 1.45; align-items: baseline; }
+  .kv .row:last-child { border-bottom: 0; }
+  .kv .key { font-family: var(--mono); font-size: 18px; color: var(--ink); font-weight: 600; }
+  .kv .val { color: rgba(27,29,33,0.85); }
+
+  table.t { position: absolute; top: 340px; left: 90px; width: 1740px; border-collapse: collapse; font-size: 19px; line-height: 1.4; }
+  table.t th { text-align: left; font-family: var(--mono); font-size: 13px; letter-spacing: 2px; text-transform: uppercase; color: var(--copper); font-weight: 500; padding: 0 18px 14px 0; border-bottom: 2px solid var(--ink); }
+  table.t td { padding: 14px 18px 14px 0; border-bottom: 1px solid rgba(27,29,33,0.12); vertical-align: top; color: rgba(27,29,33,0.85); }
+  table.t td.k { font-family: var(--mono); font-size: 17px; color: var(--ink); font-weight: 600; background: none; padding-left: 0; white-space: nowrap; }
+  table.t.compact td { padding-top: 10px; padding-bottom: 10px; font-size: 17px; }
+  table.t.compact td.k { font-size: 15px; }
+
+  pre.code { position: absolute; margin: 0; font-family: var(--mono); font-size: 18px; line-height: 1.6; color: var(--paper); background: var(--ink); border-radius: 16px; padding: 28px 34px; white-space: pre; overflow: hidden; }
+  pre.code .c { color: rgba(246,243,236,0.5); }
+  pre.code .h { color: var(--copper-light); }
+  pre.code .g { color: var(--amber); }
+
+  .pill { display: inline-block; padding: 6px 14px; border-radius: 999px; background: rgba(200,98,58,0.14); color: var(--ink); font-size: 16px; font-weight: 600; letter-spacing: .3px; margin: 0 8px 8px 0; }
+  .pill.ink { background: rgba(27,29,33,0.08); }
+  .pill.on { background: var(--ink); color: var(--paper); }
+
+  .callout { position: absolute; left: 90px; right: 90px; bottom: 116px; background: var(--white); border-left: 6px solid var(--copper); border-radius: 0 14px 14px 0; padding: 20px 30px; font-size: 20px; line-height: 1.5; color: var(--ink); }
+  .callout.warn { border-left-color: var(--ink); background: rgba(27,29,33,0.06); }
+  .callout strong { font-weight: 700; }
+
+  .steps { position: absolute; top: 340px; left: 90px; right: 90px; display: grid; gap: 20px; }
+  .step { display: grid; grid-template-columns: 72px 1fr; gap: 24px; align-items: start; }
+  .step .n { width: 56px; height: 56px; border-radius: 50%; background: var(--ink); color: var(--copper-light); font-size: 24px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+  .step h3 { margin: 6px 0 0; font-size: 24px; font-weight: 600; color: var(--ink); }
+  .step p { margin: 6px 0 0; font-size: 18px; line-height: 1.5; color: rgba(27,29,33,0.8); }
+
+  .stat { position: absolute; top: 360px; left: 90px; }
+  .stat .big { font-size: 200px; font-weight: 200; letter-spacing: -8px; line-height: .9; color: var(--ink); }
+  .stat .big span { color: var(--copper); }
+  .stat .cap { margin-top: 24px; font-size: 26px; color: var(--ink); max-width: 760px; line-height: 1.3; }
+  .stat-list { position: absolute; top: 380px; right: 90px; width: 700px; }
+  .stat-list .row { display: flex; justify-content: space-between; align-items: baseline; padding: 18px 0; border-bottom: 1px dashed rgba(27,29,33,0.28); }
+  .stat-list .row span:first-child { font-size: 20px; color: rgba(27,29,33,0.7); }
+  .stat-list .row span:last-child { font-size: 28px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  /* ---- covers & dividers ---- */
+  .cover { background: var(--black); color: var(--paper); }
+  .cover h1 { position: absolute; top: 250px; left: 90px; right: 470px; margin: 0; font-size: 108px; line-height: .97; font-weight: 300; letter-spacing: -2.5px; color: var(--paper); text-wrap: balance; }
+  .cover h1 span { color: var(--copper-light); font-style: italic; font-weight: 400; }
+  .cover .eyebrow { color: var(--copper-light); }
+  .cover .sub { position: absolute; top: 600px; left: 90px; right: 520px; font-size: 28px; font-weight: 400; opacity: .86; line-height: 1.35; }
+  .cover .meta { position: absolute; left: 90px; bottom: 80px; font-size: 16px; letter-spacing: .4px; line-height: 1.5; opacity: .78; }
+  .cover .logo { position: absolute; right: 60px; bottom: 80px; }
+  .cover .logo img { height: 56px; width: auto; display: block; }
+  .cover .field { position: absolute; top: 0; right: 0; width: 380px; height: 380px; background: var(--copper); }
+  /* top clear of the copper field (which ends at 380) so the numeral is never clipped by it */
+  .cover .ghost { position: absolute; top: 400px; right: 96px; font-size: 190px; font-weight: 200; line-height: 1; color: var(--copper); opacity: .22; }
+  .cover .dots { position: absolute; inset: 0; opacity: .12; }
+  /* cover with a photograph: copy column on the left, tall photo panel on the right (slide 01 only,
+     so the closing slide keeps the type-led treatment and its copper field) */
+  .cover.has-photo .photo { position: absolute; top: 100px; right: 60px; width: 720px; height: 880px; border-radius: 18px; overflow: hidden; background: var(--ink); }
+  .cover.has-photo .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cover.has-photo .accent { position: absolute; top: 100px; right: 796px; width: 6px; height: 880px; background: var(--copper); }
+  .cover.has-photo h1 { top: 220px; right: 900px; font-size: 100px; }
+  .cover.has-photo .sub { top: 600px; right: 980px; }
+  .cover.has-photo .meta { bottom: 190px; }
+  .cover.has-photo .logo { left: 90px; right: auto; }
+
+  .divider-dark { background: var(--ink); color: var(--paper); }
+  .divider-dark .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 12px; background: var(--copper-light); }
+  /* full-height photograph on the right, dissolving into the ink ground at its left edge */
+  .divider-dark .photo { position: absolute; top: 0; right: 0; width: 860px; height: 1080px; overflow: hidden; }
+  .divider-dark .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .divider-dark .photo::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, #1B1D21 0%, rgba(27,29,33,0.6) 16%, rgba(27,29,33,0) 46%); }
+  .divider-dark .num { position: absolute; top: 250px; left: 90px; font-size: 230px; font-weight: 200; line-height: 1; letter-spacing: -9px; color: var(--copper-light); }
+  .divider-dark .label { position: absolute; top: 530px; left: 90px; width: 800px; font-size: 74px; font-weight: 300; line-height: 1.02; letter-spacing: -1.5px; color: var(--paper); text-wrap: balance; }
+  .divider-dark .cap { position: absolute; top: 740px; left: 90px; width: 760px; font-size: 24px; line-height: 1.45; color: rgba(246,243,236,0.72); }
+  .divider-dark .footer { text-shadow: 0 1px 6px rgba(17,19,22,0.65); }
+
+  .divider-bright { background: var(--paper); color: var(--ink); }
+  /* photograph in the bottom-right corner, with a copper accent rule down its left edge */
+  .divider-bright .photo { position: absolute; right: 0; bottom: 0; width: 780px; height: 780px; overflow: hidden; border-top-left-radius: 24px; }
+  .divider-bright .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .divider-bright .accent { position: absolute; right: 780px; bottom: 0; width: 8px; height: 780px; background: var(--copper); }
+  .divider-bright .eyebrow { color: var(--copper); font-weight: 700; }
+  .divider-bright .num { position: absolute; top: 210px; left: 90px; font-size: 300px; font-weight: 200; line-height: .9; letter-spacing: -12px; color: var(--ink); }
+  .divider-bright .label { position: absolute; top: 610px; left: 90px; max-width: 980px; font-size: 70px; font-weight: 300; letter-spacing: -1.5px; color: var(--ink); text-wrap: balance; line-height: 1; }
+  .divider-bright .cap { position: absolute; top: 720px; left: 90px; max-width: 900px; font-size: 24px; line-height: 1.4; color: rgba(27,29,33,0.7); }
+  /* the page number lands on the copper field, where the default dark grey has too little contrast */
+  .divider-bright .footer .pg { color: rgba(255,255,255,0.95); }
+
+  /* ---- macOS UI mocks (type-led, drawn in CSS — no screenshots) ---- */
+  .mock { position: absolute; border-radius: 18px; overflow: hidden; background: var(--ink); box-shadow: 0 34px 90px -44px rgba(27,29,33,0.6); }
+  .mock .bar { height: 46px; background: rgba(17,19,22,0.98); display: flex; align-items: center; gap: 22px; padding: 0 20px; color: rgba(246,243,236,0.9); font-size: 17px; }
+  .mock .bar .sym { font-size: 19px; opacity: .9; }
+  .mock .bar .right { margin-left: auto; display: flex; gap: 20px; opacity: .85; font-variant-numeric: tabular-nums; }
+  .mock .bar .item { padding: 5px 12px; border-radius: 7px; background: var(--copper); color: var(--white); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .mock .screen { position: relative; height: calc(100% - 46px); background: linear-gradient(155deg, #262A30 0%, #1B1D21 55%, #15171A 100%); overflow: hidden; }
+  .mock .screen .grid-lines { position: absolute; inset: 0; opacity: .04; }
+  .mock .wm { position: absolute; left: 0; right: 0; text-align: center; font-size: 78px; font-weight: 700; letter-spacing: 3px; }
+  .mock .isi { position: absolute; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.3); border-radius: 12px; padding: 12px 30px; color: #FFFFFF; font-size: 58px; font-weight: 700; letter-spacing: 1px; }
+
+  .mock-menu { position: absolute; width: 540px; background: rgba(246,243,236,0.99); border-radius: 14px; box-shadow: 0 34px 90px -40px rgba(17,19,22,0.75); padding: 10px 0; color: var(--ink); font-size: 19px; }
+  .mock-menu .hdr { padding: 8px 20px 12px; }
+  .mock-menu .hdr b { display: block; font-size: 21px; font-weight: 700; }
+  .mock-menu .hdr span { font-size: 15px; color: rgba(27,29,33,0.6); }
+  .mock-menu .sep { height: 1px; background: rgba(27,29,33,0.15); margin: 9px 0; }
+  .mock-menu .it { display: flex; align-items: center; gap: 12px; padding: 7px 20px; line-height: 1.35; }
+  .mock-menu .it .tick { width: 20px; color: var(--copper); font-weight: 700; }
+  .mock-menu .it .sc { margin-left: auto; font-family: var(--mono); font-size: 14px; color: rgba(27,29,33,0.5); }
+  .mock-menu .it.cur { font-weight: 700; }
+  .mock-menu .it.hl { background: rgba(200,98,58,0.18); }
+
+  .legend { position: absolute; display: grid; gap: 20px; }
+  .legend .row { display: grid; grid-template-columns: 30px 1fr; gap: 16px; align-items: start; }
+  .legend .dot { width: 26px; height: 26px; border-radius: 50%; background: var(--copper); color: var(--white); font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 4px; }
+  .legend h4 { margin: 0; font-size: 21px; font-weight: 600; color: var(--ink); }
+  .legend p { margin: 6px 0 0; font-size: 17px; line-height: 1.45; color: rgba(27,29,33,0.78); }
+</style>
+</head>
+<body>
+<div id="frame"><div id="stage">

@@ -1,0 +1,65 @@
+</div></div>
+<div id="nav"><button id="prev" title="Previous (←)">‹</button><span class="counter" id="counter"></span><button id="next" title="Next (→)">›</button></div>
+<div id="progress"></div>
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var stage = document.getElementById('stage');
+  var counter = document.getElementById('counter');
+  var progress = document.getElementById('progress');
+  var idx = 0;
+
+  // number the footers automatically
+  slides.forEach(function (s, i) {
+    var n = s.querySelector('.footer .pg');
+    if (n && !n.textContent.trim()) n.textContent = String(i + 1).padStart(2, '0');
+  });
+
+  function fit() {
+    var vv = window.visualViewport;
+    var w = vv ? vv.width : window.innerWidth;
+    var h = vv ? vv.height : window.innerHeight;
+    var s = Math.min(w / 1920, h / 1080);
+    var x = Math.round((w - 1920 * s) / 2);
+    var y = Math.round((h - 1080 * s) / 2);
+    stage.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + s + ')';
+  }
+
+  function show(i, push) {
+    idx = Math.max(0, Math.min(slides.length - 1, i));
+    slides.forEach(function (s, j) { s.classList.toggle('active', j === idx); });
+    counter.textContent = (idx + 1) + ' / ' + slides.length;
+    progress.style.width = ((idx + 1) / slides.length * 100) + '%';
+    if (push !== false) { try { history.replaceState(null, '', '#' + (idx + 1)); } catch (e) {} }
+  }
+  window.showSlide = function (n) { show(n - 1); }; // 1-based, same as the URL hash
+
+  function fromHash() {
+    var n = parseInt((location.hash || '').replace('#', ''), 10);
+    show(isNaN(n) ? 0 : n - 1, false);
+  }
+
+  document.getElementById('prev').addEventListener('click', function () { show(idx - 1); });
+  document.getElementById('next').addEventListener('click', function () { show(idx + 1); });
+  document.addEventListener('keydown', function (e) {
+    if (e.target && (e.target.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName))) return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { e.preventDefault(); show(idx + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); show(idx - 1); }
+    else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(slides.length - 1); }
+  });
+  window.addEventListener('resize', fit);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', fit);
+  window.addEventListener('hashchange', fromHash);
+  // navigation chrome appears on mouse movement and fades when idle
+  var nav = document.getElementById('nav'), navTimer = null;
+  function wake() { nav.classList.add('show'); clearTimeout(navTimer); navTimer = setTimeout(function () { nav.classList.remove('show'); }, 2500); }
+  document.addEventListener('mousemove', wake);
+  nav.addEventListener('mouseenter', function () { clearTimeout(navTimer); });
+  nav.addEventListener('mouseleave', wake);
+  fit();
+  fromHash();
+})();
+</script>
+</body>
+</html>
