@@ -70,7 +70,7 @@ Create the `jumpee-notary` profile once, from an App Store Connect API key (User
 xcrun notarytool store-credentials jumpee-notary --key ~/path/AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER-ID>
 ```
 Omit `NOTARY_PROFILE` to produce a signed but un-notarized package (local testing only).
-Plain `bash build.sh` (no `CODESIGN_IDENTITY`) keeps producing an ad-hoc-signed development build.
+Plain `bash build.sh` (no `CODESIGN_IDENTITY`) keeps producing an ad-hoc-signed development build. Every build is a universal binary (Apple silicon and Intel) with an explicit macOS 13.0 deployment target; `build.sh` fails if the compiled minimum OS does not match `LSMinimumSystemVersion`.
 
 ### Known Build Issue — SwiftBridging Module
 If you get a `redefinition of module 'SwiftBridging'` error, rename the stale modulemap:

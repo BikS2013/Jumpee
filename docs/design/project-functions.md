@@ -143,7 +143,7 @@ Jumpee requires Accessibility permissions for CGEvent synthesis (space navigatio
 Space navigation (Ctrl+N) and window moving (Ctrl+Shift+N) both require the user to enable the corresponding shortcuts in macOS System Settings. This is an inherent platform limitation.
 
 ### NFR-4: macOS Version Support
-Minimum macOS 13 (Ventura). All features work on macOS 13, 14 (Sonoma), 15 (Sequoia), and are expected to work on macOS 26 (Tahoe).
+Minimum macOS 13 (Ventura). `build.sh` compiles with `-target <arch>-apple-macos13.0` for both arm64 and x86_64 (universal binary) and verifies the declared minimum OS, so the binary's load commands agree with `LSMinimumSystemVersion`. All features work on macOS 13, 14 (Sonoma), 15 (Sequoia), and are expected to work on macOS 26 (Tahoe).
 
 ### NFR-5: Code Signing and Notarization
 Development builds (`build.sh` without `CODESIGN_IDENTITY`) are ad-hoc signed (`codesign --force --sign -`) so Accessibility permissions persist across local rebuilds. Release packages (`package.sh`, from v1.6.0) must be signed with a Developer ID Application identity, with the hardened runtime enabled and a secure timestamp; `package.sh` refuses to package an ad-hoc build. With `NOTARY_PROFILE` set (a notarytool keychain profile backed by an App Store Connect API key), the package is notarized by Apple and the ticket is stapled to the bundle, so Gatekeeper accepts downloaded releases without the quarantine workaround. Every public release must be notarized. Each release ships two artifacts built by `package.sh`: a zip of the stapled app bundle (used by the Homebrew cask) and a drag-to-Applications disk image (`.dmg`, UDZO, containing the app and an `/Applications` symlink) that is itself Developer ID signed, notarized, and stapled.

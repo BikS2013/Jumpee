@@ -12,7 +12,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="Jumpee"
-VERSION="1.7.0"
+VERSION="1.7.1"
 BUILD_DIR="$SCRIPT_DIR/build.noindex"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
@@ -25,13 +25,29 @@ echo "Building $APP_NAME $VERSION..."
 rm -rf "$BUILD_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-# Compile
-swiftc \
-    -O \
-    -framework Cocoa \
-    -F /System/Library/PrivateFrameworks \
-    -o "$MACOS_DIR/$APP_NAME" \
-    "$SCRIPT_DIR/Sources/main.swift"
+# Compile a universal binary (Apple silicon + Intel) with an explicit deployment
+# target. Without -target, swiftc uses the host/SDK version as the minimum OS and
+# the app then refuses to launch on older systems ("You can't use this version of
+# the application with this version of macOS"). MIN_MACOS must match
+# LSMinimumSystemVersion in Info.plist below.
+MIN_MACOS="13.0"
+for ARCH in arm64 x86_64; do
+    swiftc \
+        -O \
+        -target "${ARCH}-apple-macos${MIN_MACOS}" \
+        -framework Cocoa \
+        -F /System/Library/PrivateFrameworks \
+        -o "$BUILD_DIR/$APP_NAME-$ARCH" \
+        "$SCRIPT_DIR/Sources/main.swift"
+done
+lipo -create "$BUILD_DIR/$APP_NAME-arm64" "$BUILD_DIR/$APP_NAME-x86_64" -output "$MACOS_DIR/$APP_NAME"
+rm -f "$BUILD_DIR/$APP_NAME-arm64" "$BUILD_DIR/$APP_NAME-x86_64"
+
+# Verify the declared minimum OS
+for ARCH in arm64 x86_64; do
+    MINOS=$(otool -arch "$ARCH" -l "$MACOS_DIR/$APP_NAME" | awk '/LC_BUILD_VERSION/{f=1} f && /minos/{print $2; exit}')
+    [ "$MINOS" = "$MIN_MACOS" ] || { echo "ERROR: $ARCH slice declares minos $MINOS, expected $MIN_MACOS" >&2; exit 1; }
+done
 
 # Create Info.plist
 cat > "$CONTENTS_DIR/Info.plist" << PLIST
@@ -54,7 +70,7 @@ cat > "$CONTENTS_DIR/Info.plist" << PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
+    <string>$MIN_MACOS</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>
