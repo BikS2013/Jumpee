@@ -20,7 +20,33 @@ Six photorealistic images carry the cover and the five section dividers. The sub
 - The style brief in that script is lifted **verbatim** from the theme's own candidate generator (`nbg-design-skill-dev/docs/nbg-design-docs/biks2013-theme/candidates/gen.mjs`), so this set sits in the same visual family as the 21 BikS2013 candidates still awaiting review.
 - Every prompt forbids text, letters, logos and UI labels, and the screens in every image are dark or warmly lit and unreadable. Nothing is teal or blue — that is the NBG theme's palette.
 
-Everything else on the slides is **type-led and drawn in CSS**: the macOS UI mocks (menu bar with the status item, the dropdown menu, the rename panel, the Settings panes, a pinned window floating over dimmed ones, and both overlays). There are no screenshots of the app.
+## Screenshots of the running app
+
+One thing in the deck is a photograph of the app — `menu.png` on slide 06, taken from the running Jumpee v1.9.1 with `screencapture` at the display's native 2x. It shows the dropdown: the header card, the filter field, the display group, the desktops and their key equivalents, the three action buttons and the overlay status line. `make-datauris.sh` converts it to JPEG (quality 85) and writes `assets/shot-menu.datauri.txt`, so the slide places it with `{{SHOT_MENU}}`.
+
+Note that this capture *does* carry the Terminal window behind it. It is the one place where that is still visible, and it is a candidate for the same treatment as the rest.
+
+Everything else that depicts the UI is **drawn**, in the deck's own palette:
+
+- `.stg` — the four Settings panes (slides 22–25)
+- `.mbar` — the menu bar (slide 05)
+- `.rnp` — the rename panel (slide 08)
+- `.ind` — the input-source indicator (slide 12)
+- `.mock`, `.mock-menu` — the pinned-window illustration (slide 11) and the macOS System Settings panes (slides 17–18)
+
+A capture of a macOS window brings the system accent colour with it, and a blue toggle beside copper reads as a mistake. Worse, every one of these is a *floating* panel, so its backdrop is whatever happened to be behind it — a code editor, the Terminal's tab bar — and that backdrop survives at the edges of any crop, because a rounded corner and a drop shadow cannot be trimmed to nothing. Copper takes the role the accent plays in the app: switches, the selected tab, sliders, status dots, the primary button, the destructive label.
+
+The menu bar (`.mbar`) is drawn for one more reason: a real capture of it is mostly *other apps'* status items — ChatGPT, Wi-Fi, battery, the clock — so the one item the slide is about is lost in the crowd. In the drawn version everything but Jumpee's own item is an abstract mark.
+
+Slide 09's watermark is drawn for a different reason: the shipped default is 9% black, which photographs as nothing. The Appearance pane's live preview on slide 23 shows it instead.
+
+Those slides say so on the slide.
+
+One hazard worth knowing before editing the drawn panels: the deck's own classes are global, so a child class named after one of them silently inherits its `position`/`top`/`left`. `.body` (slides' absolute body) and `.note` (absolute footnote) both bit these panes — hence `.cnt` and `.snote`. Everything under `.stg` is now verified collision-free.
+
+## Copy provenance
+
+Every screenshot was re-taken and every version string re-checked against the running app on 2026-09-15. The deck previously said v1.8.0; the app is v1.9.1.
 
 ## Sources and how to rebuild
 

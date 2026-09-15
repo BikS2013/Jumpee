@@ -9,7 +9,7 @@
   <div class="eyebrow">BikS2013 · project notes</div>
   <h1>Your desktops<br />have names<br /><span>now.</span></h1>
   <div class="sub">Jumpee is a small macOS menu bar app that names your Mission Control desktops, jumps you between them from the keyboard, and prints the name of the one you are on straight onto the wallpaper.</div>
-  <div class="meta">A product tour · what it does, how to install it, how to configure it<br />Version 1.8.0 · September 2026</div>
+  <div class="meta">A product tour · what it does, how to install it, how to configure it<br />Version 1.9.1 · September 2026</div>
   <div class="logo"><img src="{{LOGO_KNOCKOUT}}" alt="BikS2013" /></div>
 </section>
 
@@ -85,25 +85,20 @@
   <div class="eyebrow">01 · The menu bar</div>
   <div class="title">The name of the desktop you are on, always in sight.</div>
   <div class="rule"></div>
-  <div class="mock" style="top:320px;left:90px;width:1740px;height:400px">
-    <div class="bar">
-      <span class="sym">Finder</span>
-      <span>File</span><span>Edit</span><span>View</span>
-      <span class="right">
-        <span class="item">▣&nbsp;Development</span>
-        <span>Mon 14 Sep</span>
-        <span>09:41</span>
-      </span>
-    </div>
-    <div class="screen">
-      <svg class="grid-lines" width="1740" height="354" aria-hidden="true">
-        <defs><pattern id="mock-diag" width="44" height="44" patternUnits="userSpaceOnUse"><path d="M0 44 L44 0" stroke="#F6F3EC" stroke-width="0.6" /></pattern></defs>
-        <rect width="1740" height="354" fill="url(#mock-diag)" />
-      </svg>
-      <div class="wm" style="top:120px;color:#FF0000;opacity:.38">DEVELOPMENT</div>
-    </div>
+  <div class="mbar" style="top:330px;left:90px;width:1740px;height:64px">
+    <i style="width:54px"></i><i style="width:30px"></i><i style="width:36px"></i><i style="width:28px"></i>
+    <span class="grow"></span>
+    <i style="width:19px"></i><i style="width:19px"></i><i style="width:19px"></i>
+    <span class="jitem"><svg width="18" height="15" viewBox="0 0 18 15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="1" y="1" width="16" height="10" rx="2"/><path d="M9 11v2.2M5.6 13.2h6.8"/></svg>2: llama.cpp</span>
+    <i style="width:19px"></i><i style="width:19px"></i><i style="width:34px"></i>
   </div>
-  <div class="callout" style="top:770px;bottom:auto">The status item carries the system display symbol and the current space's name. <strong>Settings › General</strong> decides whether the desktop number comes along — <span class="k">4: Browser</span> or just <span class="k">Browser</span>. Unnamed desktops still read <span class="k">Desktop 2</span>. The mock above shows the watermark at 35% opacity for legibility; the shipped default is 15%.</div>
+  <div class="shot-cap" style="top:416px;left:90px;width:1740px">A synthetic representation — the menu bar, with Jumpee's status item reading <strong>2: llama.cpp</strong>. Everything but that item is an abstract mark.</div>
+  <div class="legend" style="top:484px;left:90px;width:1740px">
+    <div class="row"><div class="dot">1</div><div><h4>The display symbol</h4><p>Shown beside the name, so a two-screen setup still tells you which display you are reading.</p></div></div>
+    <div class="row"><div class="dot">2</div><div><h4>The desktop number</h4><p><strong>Settings › General</strong> decides whether it comes along — <span class="k">2: llama.cpp</span> or just <span class="k">llama.cpp</span>.</p></div></div>
+    <div class="row"><div class="dot">3</div><div><h4>The name you gave it</h4><p>Whatever you typed when you renamed that desktop — and it follows the space, not its position in the row.</p></div></div>
+  </div>
+  <div class="callout" style="top:800px;bottom:auto">Unnamed desktops still read <span class="k">Desktop 2</span>, so the status item is never blank — and it is the same name the wallpaper overlay prints.</div>
   <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
 </section>
 
@@ -112,27 +107,16 @@
   <div class="eyebrow">01 · The list</div>
   <div class="title">Every desktop on this display, one click away.</div>
   <div class="rule"></div>
-  <div class="mock-menu" style="top:330px;left:90px">
-    <div class="hdr"><b>Development</b><span>Desktop 2 · Built-in Retina Display</span></div>
-    <div class="sep"></div>
-    <div class="it"><span class="tick"></span>1 · Mail &amp; Calendar<span class="sc">⌘1</span></div>
-    <div class="it cur"><span class="tick">✓</span>2 · Development<span class="sc">⌘2</span></div>
-    <div class="it"><span class="tick"></span>3 · Terminal<span class="sc">⌘3</span></div>
-    <div class="it"><span class="tick"></span>4 · Browser<span class="sc">⌘4</span></div>
-    <div class="sep"></div>
-    <div class="it"><span class="tick"></span>Move Window To…<span class="sc">▸</span></div>
-    <div class="it"><span class="tick"></span>Pin Window on Top<span class="sc">⌃⌘P</span></div>
-    <div class="sep"></div>
-    <div class="it"><span class="tick"></span>Rename Current Desktop…<span class="sc">⌘N</span></div>
-    <div class="it"><span class="tick"></span>Settings…<span class="sc">⌘,</span></div>
-    <div class="it"><span class="tick"></span>About Jumpee</div>
-    <div class="it"><span class="tick"></span>Quit Jumpee<span class="sc">⌘Q</span></div>
+  <div class="shot" style="top:320px;left:90px;width:440px;height:550px">
+    <img src="{{SHOT_MENU}}" alt="The Jumpee dropdown, captured from the running app" />
   </div>
-  <div class="legend" style="top:340px;left:760px;width:1070px">
-    <div class="row"><div class="dot">1</div><div><h4>Current desktop as a heading</h4><p>The same context the menu bar shows, repeated where you are already looking — name, desktop number and display.</p></div></div>
-    <div class="row"><div class="dot">2</div><div><h4>The desktops themselves</h4><p>Only the active display's spaces, numbered as that display numbers them. A tick marks where you are; clicking any other one jumps straight there.</p></div></div>
-    <div class="row"><div class="dot">3</div><div><h4>The window actions</h4><p>Move the focused window to another desktop, or pin it above everything else. Both are described later in this section.</p></div></div>
-    <div class="row"><div class="dot">4</div><div><h4>Desktop and app commands</h4><p>Rename, Settings, About and Quit. Persistent preferences deliberately live in Settings, not in this menu.</p></div></div>
+  <div class="shot-cap" style="top:884px;left:90px;width:440px">The dropdown, captured from the running app.</div>
+  <div class="legend" style="top:326px;left:620px;width:1210px">
+    <div class="row"><div class="dot">1</div><div><h4>Where you are</h4><p>The header repeats the menu bar's context — the desktop's name, its number and the display it belongs to.</p></div></div>
+    <div class="row"><div class="dot">2</div><div><h4>Filter desktops</h4><p>Type to narrow a long list. The group header above the names says which display these spaces belong to.</p></div></div>
+    <div class="row"><div class="dot">3</div><div><h4>The desktops themselves</h4><p>Only the active display's spaces, numbered as that display numbers them. A tick marks where you are, and <span class="k">⌘1</span>–<span class="k">⌘9</span> jump straight there.</p></div></div>
+    <div class="row"><div class="dot">4</div><div><h4>Rename, Move Window, Pin Window</h4><p>The three actions, one click each — <span class="k">⌘N</span> to rename, <span class="k">⌃⌘P</span> to pin.</p></div></div>
+    <div class="row"><div class="dot">5</div><div><h4>The footer line</h4><p>Reports which overlays are running, beside the button that opens <strong>Settings</strong>. About and Quit live there now, in the Advanced pane, rather than in this list.</p></div></div>
   </div>
   <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
 </section>
@@ -175,17 +159,24 @@
       </ul>
     </div>
     <div>
-      <div class="card" style="padding:0;overflow:hidden">
-        <div style="padding:26px 30px 0;font-size:21px;font-weight:700">Rename Desktop</div>
-        <div style="padding:8px 30px 0;font-size:15px;color:rgba(27,29,33,0.6)">Desktop 2 · Built-in Retina Display</div>
-        <div style="margin:22px 30px 0;padding:12px 16px;border:2px solid var(--copper);border-radius:9px;font-size:21px">Development<span style="color:var(--copper)">|</span></div>
-        <div style="display:flex;gap:12px;justify-content:flex-end;padding:22px 30px 26px">
-          <span style="padding:9px 22px;border-radius:8px;background:rgba(27,29,33,0.08);font-size:17px">Cancel</span>
-          <span style="padding:9px 22px;border-radius:8px;background:var(--copper);color:#fff;font-weight:600;font-size:17px">Rename</span>
+      <div class="rnp" style="position:relative;width:660px">
+        <div class="head">
+          <div class="icon"></div>
+          <div>
+            <h3>Rename Desktop 2</h3>
+            <div class="sub">Give this desktop a name that is easy to recognize.</div>
+          </div>
         </div>
-        <div style="border-top:1px solid rgba(27,29,33,0.14);padding:15px 30px;font-size:17px;color:var(--copper);font-weight:600">Remove Name</div>
+        <div class="field"><span class="sel">llama.cpp</span></div>
+        <div class="hint">Press Return to rename</div>
+        <div class="actions">
+          <span class="remove">Remove Name</span>
+          <span class="grow"></span>
+          <span class="btn ghost">Cancel</span>
+          <span class="btn primary">Rename</span>
+        </div>
       </div>
-      <p style="margin:22px 0 0;font-size:16px;line-height:1.5;color:rgba(27,29,33,0.6)">The rename panel, as it appears over your current desktop.</p>
+      <p style="margin:22px 0 0;font-size:16px;line-height:1.5;color:rgba(27,29,33,0.6)">A synthetic representation of the rename panel, drawn in the deck's palette.</p>
     </div>
   </div>
   <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
@@ -277,24 +268,24 @@
   <div class="eyebrow">01 · The keyboard language</div>
   <div class="title">See the keyboard language <em>without hunting for it</em>.</div>
   <div class="rule"></div>
-  <div class="mock" style="top:330px;left:90px;width:1000px;height:380px">
+  <div class="ind" style="top:330px;left:90px;width:760px;height:364px">
     <div class="bar">
-      <span class="sym">Finder</span><span>File</span><span>Edit</span>
-      <span class="right"><span class="item">▣&nbsp;Development</span><span>09:41</span></span>
+      <i style="width:46px"></i><i style="width:30px"></i><i style="width:36px"></i><i style="width:26px"></i>
+      <span class="spacer"></span>
+      <i style="width:22px"></i><i style="width:18px"></i>
+      <span class="sitem"></span>
     </div>
-    <div class="screen">
-      <svg class="grid-lines" width="1000" height="334" aria-hidden="true">
-        <defs><pattern id="isi-diag" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M0 40 L40 0" stroke="#F6F3EC" stroke-width="0.6" /></pattern></defs>
-        <rect width="1000" height="334" fill="url(#isi-diag)" />
-      </svg>
-      <div class="isi" style="top:52px;font-size:52px">Greek</div>
+    <div class="desk">
+      <div class="pill">EN</div>
+      <div class="cap">just below the menu bar · centred</div>
     </div>
   </div>
-  <div class="legend" style="top:340px;left:1160px;width:670px">
+  <div class="shot-cap" style="top:712px;left:90px;width:760px">A synthetic representation of the indicator — the pill floats just under the menu bar, over whatever you happen to be working in.</div>
+  <div class="legend" style="top:340px;left:930px;width:900px">
     <div class="row"><div class="dot">1</div><div><h4>Just below the menu bar</h4><p>Centred, notch-aware, on whichever display holds the space you are on.</p></div></div>
     <div class="row"><div class="dot">2</div><div><h4>Changes the instant you switch</h4><p>No polling — it listens for the system's input-source notification. Duplicate notices are ignored.</p></div></div>
     <div class="row"><div class="dot">3</div><div><h4>No new permissions</h4><p>The keyboard input-source APIs need nothing beyond what Jumpee already holds.</p></div></div>
-    <div class="row"><div class="dot">4</div><div><h4>Independent of the watermark</h4><p>Text size, font, weight, colour, opacity, the background pill — and it runs happily alongside the desktop name.</p></div></div>
+    <div class="row"><div class="dot">4</div><div><h4>Independent of the watermark</h4><p>Size, font, weight, colour, opacity and the background pill, plus a per-language label and colour of your own.</p></div></div>
   </div>
   <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 01</span></div><span class="pg"></span></div>
 </section>
@@ -491,13 +482,41 @@ brew uninstall --cask jumpee</pre>
   <div class="eyebrow">04 · General</div>
   <div class="title">General decides what exists.</div>
   <div class="rule"></div>
-  <div class="kv" style="top:320px">
-    <div class="row"><div class="key">Menu bar icon</div><div class="val">Hide the status item and keep the hotkeys. With the icon hidden, the list opens at the cursor instead.</div></div>
-    <div class="row"><div class="key">Desktop number</div><div class="val"><span class="k">4: Browser</span> or just <span class="k">Browser</span> — your choice, everywhere the name appears.</div></div>
-    <div class="row"><div class="key">Dropdown at cursor</div><div class="val">Open the list where the pointer happens to be, or at the menu bar item. Cursor is the default.</div></div>
-    <div class="row"><div class="key">Desktop overlay</div><div class="val">The wallpaper watermark, on or off.</div></div>
-    <div class="row"><div class="key">Input source indicator</div><div class="val">The keyboard-language overlay, on or off.</div></div>
-    <div class="row"><div class="key">Move windows / Pin windows on top</div><div class="val">Each feature brings its own menu entries and its own hotkey — and takes them away again when switched off.</div></div>
+  <div class="stg" style="top:320px;left:90px;width:600px">
+    <div class="bar"><span class="tls"><i></i><i></i><i></i></span><span class="t">General</span></div>
+    <div class="tabs">
+      <span class="on"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="2.6"/><path d="M8 1.4v2.2M8 12.4v2.2M1.4 8h2.2M12.4 8h2.2M3.4 3.4l1.5 1.5M11.1 11.1l1.5 1.5M12.6 3.4l-1.5 1.5M4.9 11.1l-1.5 1.5"/></svg>General</span>
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10.2 2.6l3.2 3.2-5.6 5.6-3.2-3.2z"/><path d="M4.6 8.2L2 13.9l5.7-2.5"/></svg>Appearance</span>
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1.4" y="3.6" width="13.2" height="8.8" rx="2"/><path d="M4.2 6.4h.01M6.6 6.4h.01M9 6.4h.01M11.4 6.4h.01M4.6 9.4h6.8"/></svg>Shortcuts</span>
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 4.6h12M2 8h12M2 11.4h12"/><circle cx="5.2" cy="4.6" r="1.7" fill="var(--white)"/><circle cx="10.8" cy="8" r="1.7" fill="var(--white)"/><circle cx="6.4" cy="11.4" r="1.7" fill="var(--white)"/></svg>Advanced</span>
+    </div>
+    <div class="cnt">
+      <div class="gl">Menu Bar</div>
+      <div class="gb">
+        <div class="r"><span>Show desktop number</span><span class="sw on grow"><b></b></span></div>
+        <div class="r"><span>Show Jumpee in the menu bar</span><span class="sw on grow"><b></b></span></div>
+      </div>
+      <div class="gl">Dropdown</div>
+      <div class="gb">
+        <div class="r" style="min-height:50px"><span>Open the desktop list at<div class="sub">The global shortcut can follow the pointer or use the menu-bar item.</div></span><span class="seg grow"><span>Menu Bar</span><span class="on">Pointer</span></span></div>
+      </div>
+      <div class="gl">Features</div>
+      <div class="gb">
+        <div class="r"><span>Desktop overlay</span><span class="sw on grow"><b></b></span></div>
+        <div class="r"><span>Input source indicator</span><span class="sw on grow"><b></b></span></div>
+        <div class="r"><span>Move windows between desktops</span><span class="sw on grow"><b></b></span></div>
+        <div class="r"><span>Pin windows on top</span><span class="sw on grow"><b></b></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="shot-cap" style="top:912px;left:90px;width:600px">A synthetic representation of the General pane, drawn in the deck's palette.</div>
+  <div class="kv" style="top:326px;left:740px;right:90px">
+    <div class="row" style="grid-template-columns:250px 1fr"><div class="key">Menu bar icon</div><div class="val">Show Jumpee in the menu bar — or hide the icon and keep the hotkeys working.</div></div>
+    <div class="row" style="grid-template-columns:250px 1fr"><div class="key">Desktop number</div><div class="val"><span class="k">2: llama.cpp</span> or just <span class="k">llama.cpp</span>.</div></div>
+    <div class="row" style="grid-template-columns:250px 1fr"><div class="key">Dropdown at</div><div class="val">The menu bar item, or wherever the pointer happens to be.</div></div>
+    <div class="row" style="grid-template-columns:250px 1fr"><div class="key">Desktop overlay</div><div class="val">The wallpaper watermark.</div></div>
+    <div class="row" style="grid-template-columns:250px 1fr"><div class="key">Input source indicator</div><div class="val">The keyboard-language overlay.</div></div>
+    <div class="row" style="grid-template-columns:250px 1fr"><div class="key">Move / Pin</div><div class="val">Each feature brings its own menu entries and hotkey, and takes them away when switched off.</div></div>
   </div>
   <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 04</span></div><span class="pg"></span></div>
 </section>
@@ -507,28 +526,41 @@ brew uninstall --cask jumpee</pre>
   <div class="eyebrow">04 · Appearance</div>
   <div class="title">Appearance, <em>with a live preview</em>.</div>
   <div class="rule"></div>
-  <div class="grid g2" style="top:320px">
-    <div>
-      <div class="kv" style="position:static">
-        <div class="row" style="grid-template-columns:260px 1fr"><div class="key">Watermark</div><div class="val">Font, size, weight, text colour, opacity, anchor and margin from the edge.</div></div>
-        <div class="row" style="grid-template-columns:260px 1fr"><div class="key">Indicator text</div><div class="val">Size, font, weight, colour, opacity and a vertical offset below the menu bar.</div></div>
-        <div class="row" style="grid-template-columns:260px 1fr"><div class="key">Indicator pill</div><div class="val">Background colour, background opacity and corner radius.</div></div>
-        <div class="row" style="grid-template-columns:260px 1fr"><div class="key">Restore defaults</div><div class="val">Resets the visuals but keeps each feature's on/off state — and keeps your per-language labels.</div></div>
-      </div>
+  <div class="stg" style="top:320px;left:90px;width:600px">
+    <div class="bar"><span class="tls"><i></i><i></i><i></i></span><span class="t">Appearance</span></div>
+    <div class="tabs">
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="2.6"/><path d="M8 1.4v2.2M8 12.4v2.2M1.4 8h2.2M12.4 8h2.2M3.4 3.4l1.5 1.5M11.1 11.1l1.5 1.5M12.6 3.4l-1.5 1.5M4.9 11.1l-1.5 1.5"/></svg>General</span>
+      <span class="on"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10.2 2.6l3.2 3.2-5.6 5.6-3.2-3.2z"/><path d="M4.6 8.2L2 13.9l5.7-2.5"/></svg>Appearance</span>
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1.4" y="3.6" width="13.2" height="8.8" rx="2"/><path d="M4.2 6.4h.01M6.6 6.4h.01M9 6.4h.01M11.4 6.4h.01M4.6 9.4h6.8"/></svg>Shortcuts</span>
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 4.6h12M2 8h12M2 11.4h12"/><circle cx="5.2" cy="4.6" r="1.7" fill="var(--white)"/><circle cx="10.8" cy="8" r="1.7" fill="var(--white)"/><circle cx="6.4" cy="11.4" r="1.7" fill="var(--white)"/></svg>Advanced</span>
     </div>
-    <div>
-      <div class="mock" style="position:relative;width:100%;height:330px">
-        <div class="bar">
-          <span class="sym">Finder</span><span>File</span>
-          <span class="right"><span class="item">▣&nbsp;Terminal</span><span>09:41</span></span>
-        </div>
-        <div class="screen">
-          <div class="wm" style="top:40px;color:#E3A64A;opacity:.5;font-size:52px;letter-spacing:1px">TERMINAL</div>
-          <div class="isi" style="top:180px;font-size:40px">U.S.</div>
-        </div>
+    <div class="cnt">
+      <div class="gl">Desktop Overlay</div>
+      <div class="gb">
+        <div class="r"><span class="lbl">Position:</span><span class="pop" style="width:172px">Top Center</span></div>
+        <div class="r"><span class="lbl">Font:</span><span class="pop" style="width:172px">Aptos Bold</span></div>
+        <div class="r"><span class="lbl">Size:</span><span class="fld">72</span></div>
+        <div class="r"><span class="lbl">Color:</span><span class="swatch" style="background:#111316"></span></div>
+        <div class="r"><span class="lbl">Opacity:</span><span class="sldr"><span class="tr"><i style="width:9%"></i><b style="left:9%"></b></span><span class="pc">9%</span></span></div>
+        <div class="r"><span class="lbl">Margin:</span><span class="fld">40</span></div>
       </div>
-      <p style="margin:20px 0 0;font-size:16px;line-height:1.5;color:rgba(27,29,33,0.6)">Both overlays in one preview — the watermark and the input-source pill, styled independently.</p>
+      <div class="gl">Input Source Indicator</div>
+      <div class="gb">
+        <div class="r"><span class="lbl">Label size:</span><span class="fld">40</span></div>
+        <div class="r"><span class="lbl">Text color:</span><span class="swatch" style="background:#FFFFFF"></span></div>
+        <div class="r"><span class="lbl">Background:</span><span class="swatch" style="background:#111316"></span></div>
+        <div class="r"><span class="lbl">Opacity:</span><span class="sldr"><span class="tr"><i style="width:30%"></i><b style="left:30%"></b></span><span class="pc">30%</span></span></div>
+      </div>
+      <div class="gl">Preview</div>
+      <div class="prev"><span class="pl">US</span><span class="wm">1: AI Hub Registry</span></div>
     </div>
+  </div>
+  <div class="kv" style="top:326px;left:760px;right:90px">
+    <div class="row" style="grid-template-columns:250px 1fr"><div class="key">Watermark</div><div class="val">Font, size, weight, text colour, opacity, anchor and margin from the edge.</div></div>
+    <div class="row" style="grid-template-columns:250px 1fr"><div class="key">Indicator text</div><div class="val">Size, font, weight, colour, opacity and a vertical offset below the menu bar.</div></div>
+    <div class="row" style="grid-template-columns:250px 1fr"><div class="key">Indicator pill</div><div class="val">Background colour, background opacity and corner radius.</div></div>
+    <div class="row" style="grid-template-columns:250px 1fr"><div class="key">Live preview</div><div class="val">Both overlays drawn together under the controls — the watermark and the pill at once, before you commit to anything.</div></div>
+    <div class="row" style="grid-template-columns:250px 1fr"><div class="key">Restore defaults</div><div class="val">Resets the visuals but keeps each feature's on/off state — and keeps your per-language labels.</div></div>
   </div>
   <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 04</span></div><span class="pg"></span></div>
 </section>
@@ -538,32 +570,39 @@ brew uninstall --cask jumpee</pre>
   <div class="eyebrow">04 · Shortcuts</div>
   <div class="title">Record a shortcut <em>by pressing it</em>.</div>
   <div class="rule"></div>
-  <div class="grid g2" style="top:320px">
-    <div>
-      <p class="lead">No checkbox-and-text-field fiddling. Click the control, press the chord you want, and it is captured whole — modifiers and all, including named keys like Space, Return, Tab and Escape.</p>
-      <ul style="font-size:19px;line-height:1.6;color:rgba(27,29,33,0.8);padding-left:24px;margin-top:26px">
-        <li><strong>Escape</strong> with no modifiers cancels recording.</li>
-        <li>A shortcut needs at least one modifier, a key from the supported set, and no clash with the other two.</li>
-        <li>Applying it re-registers the hotkey immediately — no restart, no manual reload.</li>
-        <li>Every row has its own reset, and there is one <em>Restore Defaults</em> for all three.</li>
-        <li>Rows for disabled features stay visible, greyed out, so you can see what is available.</li>
-      </ul>
+  <div class="stg" style="top:320px;left:90px;width:600px">
+    <div class="bar"><span class="tls"><i></i><i></i><i></i></span><span class="t">Shortcuts</span></div>
+    <div class="tabs">
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="2.6"/><path d="M8 1.4v2.2M8 12.4v2.2M1.4 8h2.2M12.4 8h2.2M3.4 3.4l1.5 1.5M11.1 11.1l1.5 1.5M12.6 3.4l-1.5 1.5M4.9 11.1l-1.5 1.5"/></svg>General</span>
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10.2 2.6l3.2 3.2-5.6 5.6-3.2-3.2z"/><path d="M4.6 8.2L2 13.9l5.7-2.5"/></svg>Appearance</span>
+      <span class="on"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1.4" y="3.6" width="13.2" height="8.8" rx="2"/><path d="M4.2 6.4h.01M6.6 6.4h.01M9 6.4h.01M11.4 6.4h.01M4.6 9.4h6.8"/></svg>Shortcuts</span>
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 4.6h12M2 8h12M2 11.4h12"/><circle cx="5.2" cy="4.6" r="1.7" fill="var(--white)"/><circle cx="10.8" cy="8" r="1.7" fill="var(--white)"/><circle cx="6.4" cy="11.4" r="1.7" fill="var(--white)"/></svg>Advanced</span>
     </div>
-    <div>
-      <div class="card" style="padding:0;overflow:hidden">
-        <div style="padding:18px 26px;border-bottom:1px solid rgba(27,29,33,0.14);font-size:16px;font-weight:600">Shortcuts</div>
-        <div style="display:grid;grid-template-columns:1fr auto 62px;gap:16px;padding:17px 26px;align-items:center;border-bottom:1px solid rgba(27,29,33,0.1)">
-          <span style="font-size:18px">Open Jumpee</span><span class="kbd">⌘ J</span><span style="font-size:14px;color:var(--copper);font-weight:600;text-align:right">Reset</span>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr auto 62px;gap:16px;padding:17px 26px;align-items:center;border-bottom:1px solid rgba(27,29,33,0.1);background:rgba(200,98,58,0.07)">
-          <span style="font-size:18px">Move Current Window</span><span style="padding:5px 12px;border:2px solid var(--copper);border-radius:7px;font-family:var(--mono);font-size:15px;color:var(--copper);white-space:nowrap">Recording…</span><span style="font-size:14px;color:var(--copper);font-weight:600;text-align:right">Reset</span>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr auto 62px;gap:16px;padding:17px 26px;align-items:center;opacity:.45">
-          <span style="font-size:18px">Pin or Unpin Window</span><span class="kbd">⌃ ⌘ P</span><span style="font-size:14px;text-align:right">Reset</span>
-        </div>
+    <div class="cnt">
+      <div class="gl">Global Shortcuts</div>
+      <div class="gb">
+        <div class="r" style="min-height:48px"><span>Open Jumpee<div class="sub">Show the desktop list from anywhere</div></span><span class="key grow">⌘J</span><span class="rst">↺</span></div>
+        <div class="r" style="min-height:48px"><span>Move Current Window<div class="sub">Choose a destination desktop</div></span><span class="key grow">⌘^M</span><span class="rst">↺</span></div>
+        <div class="r" style="min-height:48px"><span>Pin or Unpin Window<div class="sub">Keep the focused window above others</div></span><span class="key grow">^⌘P</span><span class="rst">↺</span></div>
       </div>
-      <p style="margin:20px 0 0;font-size:16px;line-height:1.5;color:rgba(27,29,33,0.6)">The third row is greyed out because Pin windows on top is switched off in General.</p>
+      <div class="gl">Menu Shortcuts</div>
+      <div class="gb">
+        <div class="r">Switch to Desktop 1–9<span class="chord grow" style="text-align:right">⌘1 … ⌘9</span></div>
+        <div class="r">Rename Current Desktop<span class="chord grow" style="text-align:right">⌘N</span></div>
+      </div>
+      <div class="snote">Jumpee warns you if a shortcut conflicts with another Jumpee action. Press Escape while recording to cancel.</div>
+      <div class="pbtn" style="display:inline-block;margin-top:14px">Restore Defaults</div>
     </div>
+  </div>
+  <div style="position:absolute;top:330px;left:760px;right:90px">
+    <p class="lead">No checkbox-and-text-field fiddling. Click a shortcut, press the chord you want, and it is captured whole — modifiers and all, including named keys like Space, Return, Tab and Escape.</p>
+    <ul style="font-size:19px;line-height:1.6;color:rgba(27,29,33,0.8);padding-left:24px;margin-top:26px">
+      <li><strong>Escape</strong> with no modifiers cancels recording.</li>
+      <li>A shortcut needs at least one modifier, a key from the supported set, and no clash with the other two.</li>
+      <li>Applying it re-registers the hotkey immediately — no restart, no manual reload.</li>
+      <li>Every row has its own reset, and there is one <em>Restore Defaults</em> for all three.</li>
+      <li>Rows for disabled features stay visible, greyed out, so you can see what is available.</li>
+    </ul>
   </div>
   <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 04</span></div><span class="pg"></span></div>
 </section>
@@ -573,27 +612,38 @@ brew uninstall --cask jumpee</pre>
   <div class="eyebrow">04 · Advanced</div>
   <div class="title">Advanced tells you what macOS is holding back.</div>
   <div class="rule"></div>
-  <div class="grid g2" style="top:330px">
-    <div class="card">
-      <span class="tag">Status</span>
-      <h3>Three checks, one screen</h3>
-      <ul>
-        <li><strong>Accessibility</strong> — granted or not, with a way through to the pane.</li>
-        <li><strong>Mission Control shortcuts</strong> — whether Switch to Desktop 1–9 are detected, plus a <em>Review Shortcuts…</em> button.</li>
-        <li><strong>Screen Recording</strong> — the permission pinning depends on.</li>
-      </ul>
-      <p class="muted" style="font-size:17px">No guessing why a feature is quiet.</p>
+  <div class="stg" style="top:320px;left:90px;width:600px">
+    <div class="bar"><span class="tls"><i></i><i></i><i></i></span><span class="t">Advanced</span></div>
+    <div class="tabs">
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="2.6"/><path d="M8 1.4v2.2M8 12.4v2.2M1.4 8h2.2M12.4 8h2.2M3.4 3.4l1.5 1.5M11.1 11.1l1.5 1.5M12.6 3.4l-1.5 1.5M4.9 11.1l-1.5 1.5"/></svg>General</span>
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10.2 2.6l3.2 3.2-5.6 5.6-3.2-3.2z"/><path d="M4.6 8.2L2 13.9l5.7-2.5"/></svg>Appearance</span>
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1.4" y="3.6" width="13.2" height="8.8" rx="2"/><path d="M4.2 6.4h.01M6.6 6.4h.01M9 6.4h.01M11.4 6.4h.01M4.6 9.4h6.8"/></svg>Shortcuts</span>
+      <span class="on"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 4.6h12M2 8h12M2 11.4h12"/><circle cx="5.2" cy="4.6" r="1.7" fill="var(--white)"/><circle cx="10.8" cy="8" r="1.7" fill="var(--white)"/><circle cx="6.4" cy="11.4" r="1.7" fill="var(--white)"/></svg>Advanced</span>
     </div>
-    <div class="card ink">
-      <span class="tag">The file</span>
-      <h3 style="color:var(--paper)">Reveal and reload</h3>
-      <ul>
-        <li><strong>Reveal config file</strong> opens the JSON in Finder.</li>
-        <li><strong>Reload Now</strong> re-reads it and re-registers every hotkey — no restart.</li>
-        <li>Everything the Settings panes do lands in that same file, so hand-edits and UI edits never diverge.</li>
-      </ul>
-      <p style="color:rgba(246,243,236,0.7);font-size:17px">Edited by hand and it did not take? Reload Now is the answer.</p>
+    <div class="cnt">
+      <div class="gl">System Setup</div>
+      <div class="gb">
+        <div class="r"><span>Accessibility</span><span class="ok grow"><i></i>Granted</span><span class="pbtn">Open System Settings…</span></div>
+        <div class="r"><span>Mission Control Shortcuts</span><span class="ok grow"><i></i>Detected</span><span class="pbtn">Review Shortcuts…</span></div>
+        <div class="r"><span>Screen Recording</span><span class="ok grow"><i></i>Granted</span><span class="pbtn">Grant Access…</span></div>
+      </div>
+      <div class="gl">Configuration File</div>
+      <div class="gb">
+        <div class="r"><span>Configuration file</span><span class="chord grow" style="text-align:right;color:rgba(27,29,33,0.7)">~/.tool-agents/jumpee/config.json</span></div>
+        <div class="r"><span>File actions</span><span class="grow"></span><span class="pbtn">Reveal in Finder</span><span class="pbtn">Reload Now</span></div>
+      </div>
+      <div class="snote">Changes made outside Jumpee take effect after reloading.</div>
+      <div class="gl">Application</div>
+      <div class="gb">
+        <div class="r" style="min-height:48px"><span>Jumpee 1.9.1<div class="sub">Native desktop navigation utility</div></span><span class="grow"></span><span class="pbtn">About Jumpee…</span></div>
+      </div>
+      <div class="pbtn" style="display:inline-block;margin-top:14px">Quit Jumpee</div>
     </div>
+  </div>
+  <div class="legend" style="top:340px;left:760px;width:1070px">
+    <div class="row"><div class="dot">1</div><div><h4>System Setup</h4><p>Accessibility, Mission Control shortcuts and Screen Recording, each with a live status dot and a button through to the right System Settings pane. No guessing why a feature is quiet.</p></div></div>
+    <div class="row"><div class="dot">2</div><div><h4>Configuration File</h4><p>The path in full, <em>Reveal in Finder</em>, and <em>Reload Now</em> — which re-reads the file and re-registers every hotkey without a restart.</p></div></div>
+    <div class="row"><div class="dot">3</div><div><h4>Application</h4><p>The running version, <em>About Jumpee…</em> and Quit. Everything the Settings panes write lands in that same JSON file, so hand-edits and UI edits never diverge.</p></div></div>
   </div>
   <div class="footer"><div class="brand"><img src="{{LOGO_SMALL}}" alt="BikS2013" /><span>Section 04</span></div><span class="pg"></span></div>
 </section>
@@ -696,7 +746,7 @@ brew uninstall --cask jumpee</pre>
     <div class="step"><div class="n" style="background:var(--copper);color:#fff">2</div><div><h3 style="color:var(--paper)">Grant Accessibility and switch on Desktop 1–9</h3><p style="color:rgba(246,243,236,0.78)">One permission and one set of system shortcuts. Settings › Advanced confirms both.</p></div></div>
     <div class="step"><div class="n" style="background:var(--copper);color:#fff">3</div><div><h3 style="color:var(--paper)">Name your first desktop</h3><p style="color:rgba(246,243,236,0.78)">Press <span class="k">⌘N</span>, type the name, press Return. The menu bar answers to it from that moment on.</p></div></div>
   </div>
-  <div class="meta">Jumpee v1.8.0 · macOS 13 or later · universal binary · signed and notarized<br />BikS2013 · project notes · September 2026</div>
+  <div class="meta">Jumpee v1.9.1 · macOS 13 or later · universal binary · signed and notarized<br />BikS2013 · project notes · September 2026</div>
   <div class="logo"><img src="{{LOGO_KNOCKOUT}}" alt="BikS2013" /></div>
 </section>
 
