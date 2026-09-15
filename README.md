@@ -11,7 +11,7 @@ A lightweight native macOS menu bar app for naming and jumping between Mission C
 - Rename the active desktop via the menu
 - Displays a transparent watermark overlay on the desktop with the space name
 - Names follow desktops when reordered in Mission Control (tracked by space ID)
-- All settings persist in `~/.Jumpee/config.json`
+- All settings persist in `~/.tool-agents/jumpee/config.json` (before v1.7.0: `~/.Jumpee/config.json`; the file is moved automatically on first launch)
 
 ## Install via Homebrew (recommended)
 
@@ -105,13 +105,13 @@ Desktop switching requires **Ctrl+1** through **Ctrl+9** shortcuts:
 | Rename current desktop | **Cmd+N** or click "Rename Current Desktop..." |
 | Toggle space number | Click "Hide/Show Space Number" |
 | Toggle overlay | Click "Enable/Disable Overlay" |
-| Edit config | **Cmd+,** from menu, or edit `~/.Jumpee/config.json` |
+| Edit config | **Cmd+,** from menu, or edit `~/.tool-agents/jumpee/config.json` |
 | Reload config | **Cmd+R** from menu |
 | Quit | **Cmd+Q** from menu |
 
 ## Configuration
 
-Config file: `~/.Jumpee/config.json`
+Config file: `~/.tool-agents/jumpee/config.json`
 
 ```json
 {

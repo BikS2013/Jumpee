@@ -11,7 +11,7 @@ Jumpee is a lightweight native macOS menu bar application that allows users to a
 - **Framework**: AppKit (NSStatusBar, NSMenu), Carbon (RegisterEventHotKey)
 - **Build**: `swiftc` command-line compiler (no full Xcode required)
 - **Packaging**: Standard `.app` bundle with Info.plist
-- **Config**: JSON file at `~/.Jumpee/config.json`
+- **Config**: JSON file at `~/.tool-agents/jumpee/config.json`
 
 ### Key Components
 
@@ -23,7 +23,7 @@ Jumpee is a lightweight native macOS menu bar application that allows users to a
    - Filter by type (type 0 = regular desktop, type 4 = fullscreen app)
 
 2. **JumpeeConfig** - Manages all configuration:
-   - Stores config in `~/.Jumpee/config.json`
+   - Stores config in `~/.tool-agents/jumpee/config.json`
    - Maps space IDs (ManagedSpaceID as string keys) to custom names (e.g., `{"247": "Mail", "63": "Dev"}`)
    - One-time migration from position-based keys to space-ID keys occurs at startup when legacy config is detected
    - Overlay settings (opacity, font, size, weight, position, color, margin)
@@ -77,7 +77,7 @@ These are private CoreGraphics APIs. They work on macOS but are not App Store sa
 2. User presses Cmd+J -> menu opens showing all desktops
 3. User clicks a desktop -> menu closes -> `osascript` sends Ctrl+N -> space switches -> menu reopens
 4. Space changes -> `SpaceDetector.getCurrentSpaceIndex()` called for display position, `getCurrentSpaceID()` called for config key lookup -> name looked up by space ID -> menu bar title and overlay updated
-5. User renames desktop -> space ID retrieved via `getCurrentSpaceID()` -> config saved to `~/.Jumpee/config.json` with space ID as key -> UI updated
+5. User renames desktop -> space ID retrieved via `getCurrentSpaceID()` -> config saved to `~/.tool-agents/jumpee/config.json` with space ID as key -> UI updated
 6. First launch after migration -> position-based config keys detected -> mapped to space IDs using current space ordering -> config rewritten with space-ID keys
 
 ### Configuration File
@@ -119,7 +119,7 @@ The user must enable "Move window to Desktop N" shortcuts in System Settings > K
 
 ### Configuration
 
-Optional `moveWindow` key in `~/.Jumpee/config.json`:
+Optional `moveWindow` key in `~/.tool-agents/jumpee/config.json`:
 
 ```json
 {
@@ -851,14 +851,14 @@ struct PinWindowConfig: Codable {
 
 **Design notes:**
 - Follows the exact pattern of `MoveWindowConfig` (line 107-111): a simple Codable struct with a single `enabled: Bool` field.
-- Config key in `~/.Jumpee/config.json`: `"pinWindow": { "enabled": true }`.
+- Config key in `~/.tool-agents/jumpee/config.json`: `"pinWindow": { "enabled": true }`.
 - When absent from the config file, the feature is disabled (backward compatible with existing configs).
 
 ### 3. PinWindowHotkeyConfig (uses existing HotkeyConfig)
 
 No new struct is needed. The pin-window hotkey uses the existing `HotkeyConfig` struct (lines 56-105), which already supports `key`, `modifiers`, `keyCode`, `carbonModifiers`, and `displayString`.
 
-**Config key in `~/.Jumpee/config.json`:**
+**Config key in `~/.tool-agents/jumpee/config.json`:**
 
 ```json
 {
@@ -1596,7 +1596,7 @@ The feature follows the established pattern: **Config struct + Window class + Ma
 
 ```
 +--------------------------------------------+
-|  ~/.Jumpee/config.json                     |
+|  ~/.tool-agents/jumpee/config.json                     |
 |  "inputSourceIndicator": {                 |
 |      "enabled": true,                      |
 |      "fontSize": 60, ...                   |

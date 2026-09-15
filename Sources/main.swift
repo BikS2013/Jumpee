@@ -241,11 +241,45 @@ struct JumpeeConfig: Codable {
         return pinWindowHotkey ?? HotkeyConfig(key: "p", modifiers: ["control", "command"])
     }
 
+    /// Config folder, aligned with the other tools: ~/.tool-agents/jumpee (mode 0700).
     static let configDir = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".Jumpee")
+        .appendingPathComponent(".tool-agents")
+        .appendingPathComponent("jumpee")
     static let configFile = configDir.appendingPathComponent("config.json")
+    /// Pre-1.7.0 location (~/.Jumpee); migrated to `configFile` on first launch.
+    static let legacyConfigFile = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".Jumpee")
+        .appendingPathComponent("config.json")
+
+    static func ensureConfigDir() {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: configDir, withIntermediateDirectories: true,
+                                attributes: [.posixPermissions: 0o700])
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: configDir.path)
+    }
+
+    /// Moves the legacy config file to the new location once, then removes the old folder if empty.
+    static func migrateLegacyConfigIfNeeded() {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: configFile.path),
+              fm.fileExists(atPath: legacyConfigFile.path) else { return }
+        ensureConfigDir()
+        do {
+            try fm.moveItem(at: legacyConfigFile, to: configFile)
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configFile.path)
+            let legacyDir = legacyConfigFile.deletingLastPathComponent()
+            if let remaining = try? fm.contentsOfDirectory(atPath: legacyDir.path),
+               remaining.filter({ $0 != ".DS_Store" }).isEmpty {
+                try? fm.removeItem(at: legacyDir)
+            }
+            print("[Jumpee] Migrated config from \(legacyConfigFile.path) to \(configFile.path)")
+        } catch {
+            print("[Jumpee] Failed to migrate legacy config: \(error)")
+        }
+    }
 
     static func load() -> JumpeeConfig {
+        migrateLegacyConfigIfNeeded()
         if let data = try? Data(contentsOf: configFile),
            let config = try? JSONDecoder().decode(JumpeeConfig.self, from: data) {
             return config
@@ -259,11 +293,12 @@ struct JumpeeConfig: Codable {
     }
 
     func save() {
-        try? FileManager.default.createDirectory(at: Self.configDir, withIntermediateDirectories: true)
+        Self.ensureConfigDir()
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? encoder.encode(self) {
             try? data.write(to: Self.configFile)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Self.configFile.path)
         }
     }
 }
@@ -2148,7 +2183,7 @@ class MenuBarController: NSObject {
                 You can move windows using the Jumpee menu \
                 (Move Window To... submenu).
 
-                To enable, add this to your ~/.Jumpee/config.json:
+                To enable, add this to your ~/.tool-agents/jumpee/config.json:
                 "moveWindow": { "enabled": true }
                 """
             alert.addButton(withTitle: "OK")
@@ -2168,7 +2203,7 @@ class MenuBarController: NSObject {
 
             These are the same shortcuts Jumpee uses for navigation. \
             If desktop switching already works, just add this to \
-            your ~/.Jumpee/config.json:
+            your ~/.tool-agents/jumpee/config.json:
             "moveWindow": { "enabled": true }
             """
         alert.addButton(withTitle: "Open System Settings")
@@ -2312,7 +2347,7 @@ class MenuBarController: NSObject {
 
             --- Configuration ---
 
-            Config file: ~/.Jumpee/config.json
+            Config file: ~/.tool-agents/jumpee/config.json
             Open from menu: \u{2318},
             Reload after editing: \u{2318}R
 

@@ -10,7 +10,7 @@
 Jumpee detects the currently active macOS desktop/space using private CGS APIs (`CGSGetActiveSpace`, `CGSCopyManagedDisplaySpaces`). It maps space IDs to ordinal positions and updates in real-time when the user switches desktops.
 
 ### FR-2: Custom Space Naming
-Users can assign custom names to each desktop/space via a rename dialog. Names are stored in `~/.Jumpee/config.json` keyed by the stable `ManagedSpaceID`. Names persist across reboots and space reordering.
+Users can assign custom names to each desktop/space via a rename dialog. Names are stored in `~/.tool-agents/jumpee/config.json` keyed by the stable `ManagedSpaceID`. Names persist across reboots and space reordering.
 
 ### FR-3: Menu Bar Display
 The current space's custom name is displayed in the macOS menu bar. The format is configurable: with or without the space number prefix (e.g., "3: Browser" vs "Browser").
@@ -28,7 +28,7 @@ A configurable global hotkey (default: Cmd+J) opens the Jumpee dropdown from any
 A transparent text overlay displays the current space name on the desktop background. The overlay is fully configurable: opacity, font, font size, font weight, position (9 anchor points), text color, and margin.
 
 ### FR-8: Configuration File
-All settings are stored in `~/.Jumpee/config.json`. The config file can be opened from the menu (Cmd+,) and reloaded (Cmd+R) without restarting the app.
+All settings are stored in `~/.tool-agents/jumpee/config.json`. The config file can be opened from the menu (Cmd+,) and reloaded (Cmd+R) without restarting the app.
 
 ### FR-9: No Dock Icon
 Jumpee runs as a menu bar-only app (LSUIElement) with no Dock icon and no main window.
@@ -86,7 +86,7 @@ A second global hotkey (default: Cmd+M), registered via Carbon `RegisterEventHot
 **Prerequisite:** `moveWindow.enabled` must be true in the config. When disabled, the hotkey is not registered.
 
 ### FR-22: Move Window Hotkey Configuration
-The move-window hotkey is independently configurable via the `moveWindowHotkey` key in `~/.Jumpee/config.json`, using the same schema as the main `hotkey` (key + modifiers). When absent and `moveWindow.enabled` is true, it defaults to Cmd+M.
+The move-window hotkey is independently configurable via the `moveWindowHotkey` key in `~/.tool-agents/jumpee/config.json`, using the same schema as the main `hotkey` (key + modifiers). When absent and `moveWindow.enabled` is true, it defaults to Cmd+M.
 
 ### FR-23: Multi-Hotkey Coexistence
 Both the dropdown hotkey (default Cmd+J) and the move-window hotkey (default Cmd+M) work simultaneously. They are dispatched via distinct `EventHotKeyID.id` values within a shared Carbon event handler.
@@ -176,7 +176,7 @@ The pin operation is a toggle: if the focused window is not pinned, the action p
 If a pinned window is closed by the user or its owning application, Jumpee silently removes it from the pinned set during the next cleanup pass. Cleanup is triggered before menu rebuild and on space change. No error dialog is shown.
 
 ### FR-40: Pin Window Configuration
-A `pinWindow` configuration section in `~/.Jumpee/config.json` controls whether the feature is available:
+A `pinWindow` configuration section in `~/.tool-agents/jumpee/config.json` controls whether the feature is available:
 ```json
 {
     "pinWindow": {
@@ -236,7 +236,7 @@ When the user switches to a different desktop/space, the input source indicator 
 On multi-display setups, the input source indicator appears on the display that contains the active space, using the existing `SpaceDetector.getActiveDisplayID()` and `displayIDToScreen()` infrastructure. The menu bar height is calculated per-screen to handle displays with different heights (e.g., notched MacBook vs external monitor).
 
 ### FR-52: Feature Enable/Disable via Config
-An `inputSourceIndicator` configuration section in `~/.Jumpee/config.json` controls whether the feature is active:
+An `inputSourceIndicator` configuration section in `~/.tool-agents/jumpee/config.json` controls whether the feature is active:
 ```json
 {
   "inputSourceIndicator": {

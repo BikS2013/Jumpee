@@ -2,7 +2,9 @@
 
 ## Configuration File Location
 
-**Path**: `~/.Jumpee/config.json`
+**Path**: `~/.tool-agents/jumpee/config.json`
+
+**Folder conventions**: the folder `~/.tool-agents/jumpee/` follows the same layout as the other tools on this machine. Jumpee creates it with mode `0700` and writes `config.json` with mode `0600`. Releases before v1.7.0 stored the file at `~/.Jumpee/config.json`; on first launch of v1.7.0 or later, an existing legacy file is moved to the new path and the empty `~/.Jumpee` folder is removed. If both files exist, the new path wins and the legacy file is left untouched.
 
 This is the only configuration method. There are no environment variables, CLI parameters, or fallback values. If the config file is missing, Jumpee creates it with default values on first run.
 
