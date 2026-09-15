@@ -2,6 +2,8 @@
 
 A lightweight native macOS menu bar app for naming and jumping between Mission Control desktops.
 
+**Product deck:** <https://biks2013.github.io/Jumpee/> — a 30-slide tour of what Jumpee does, how to install and configure it, and where it fits.
+
 ## What it does
 
 - Shows the current desktop's custom name in the menu bar
