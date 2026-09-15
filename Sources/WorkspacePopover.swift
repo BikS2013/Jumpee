@@ -45,7 +45,7 @@ private final class WorkspacePopoverRowView: NSView {
         layer?.cornerRadius = 9
 
         let icon = NSImageView(image: NSImage(systemSymbolName: "display", accessibilityDescription: nil) ?? NSImage())
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 17, weight: .medium)
         icon.contentTintColor = item.isCurrent ? .controlAccentColor : .labelColor
 
         let number = NSTextField(labelWithString: String(item.localPosition))
@@ -84,8 +84,8 @@ private final class WorkspacePopoverRowView: NSView {
             heightAnchor.constraint(equalToConstant: 44),
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 20),
-            icon.heightAnchor.constraint(equalToConstant: 20),
+            icon.widthAnchor.constraint(equalToConstant: 24),
+            icon.heightAnchor.constraint(equalToConstant: 24),
             number.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
             number.centerYAnchor.constraint(equalTo: centerYAnchor),
             number.widthAnchor.constraint(equalToConstant: 22),
@@ -147,6 +147,115 @@ private final class WorkspacePopoverRowView: NSView {
     }
 }
 
+private final class WorkspacePopoverActionButton: NSView {
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let clickButton = NSButton()
+    private var trackingAreaReference: NSTrackingArea?
+    private var isHovered = false
+
+    var action: (() -> Void)?
+    var isEnabled: Bool = true {
+        didSet {
+            clickButton.isEnabled = isEnabled
+            updateAppearance()
+        }
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 104, height: 72)
+    }
+
+    init(title: String, symbol: String) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 9
+        layer?.borderWidth = 1
+
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .medium)
+        iconView.contentTintColor = .labelColor
+        titleLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        titleLabel.alignment = .center
+        titleLabel.lineBreakMode = .byTruncatingTail
+
+        clickButton.title = ""
+        clickButton.isBordered = false
+        clickButton.isTransparent = true
+        clickButton.target = self
+        clickButton.action = #selector(performAction)
+
+        let content = NSStackView(views: [iconView, titleLabel])
+        content.orientation = .vertical
+        content.alignment = .centerX
+        content.spacing = 5
+
+        for child in [content, clickButton] {
+            child.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(child)
+        }
+        NSLayoutConstraint.activate([
+            content.centerXAnchor.constraint(equalTo: centerXAnchor),
+            content.centerYAnchor.constraint(equalTo: centerYAnchor),
+            content.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 8),
+            content.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            iconView.widthAnchor.constraint(equalToConstant: 24),
+            iconView.heightAnchor.constraint(equalToConstant: 24),
+            clickButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+            clickButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            clickButton.topAnchor.constraint(equalTo: topAnchor),
+            clickButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        configure(title: title, symbol: symbol)
+        updateAppearance()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference { removeTrackingArea(trackingAreaReference) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaReference = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateAppearance()
+    }
+
+    func configure(title: String, symbol: String) {
+        titleLabel.stringValue = title
+        iconView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        clickButton.setAccessibilityLabel(title)
+    }
+
+    private func updateAppearance() {
+        alphaValue = isEnabled ? 1 : 0.45
+        layer?.backgroundColor = (isHovered && isEnabled
+            ? NSColor.controlAccentColor.withAlphaComponent(0.13)
+            : NSColor.controlBackgroundColor.withAlphaComponent(0.72)).cgColor
+        layer?.borderColor = (isHovered && isEnabled
+            ? NSColor.controlAccentColor.withAlphaComponent(0.32)
+            : NSColor.separatorColor.withAlphaComponent(0.70)).cgColor
+    }
+
+    @objc private func performAction() {
+        guard isEnabled else { return }
+        action?()
+    }
+}
+
 private final class WorkspacePopoverContentViewController: NSViewController, NSSearchFieldDelegate {
     private let currentTitle = NSTextField(labelWithString: "")
     private let currentSubtitle = NSTextField(labelWithString: "")
@@ -154,9 +263,9 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
     private let scrollView = NSScrollView()
     private let documentView = WorkspacePopoverFlippedView()
     private let desktopStack = NSStackView()
-    private let renameButton = NSButton()
-    private let moveButton = NSButton()
-    private let pinButton = NSButton()
+    private let renameButton = WorkspacePopoverActionButton(title: "Rename", symbol: "pencil")
+    private let moveButton = WorkspacePopoverActionButton(title: "Move Window", symbol: "rectangle.on.rectangle")
+    private let pinButton = WorkspacePopoverActionButton(title: "Pin Window", symbol: "pin")
     private let statusDot = NSView()
     private let statusLabel = NSTextField(labelWithString: "")
     private let settingsButton = NSButton()
@@ -219,9 +328,9 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
         desktopStack.spacing = 4
         documentView.addSubview(desktopStack)
 
-        configureActionButton(renameButton, title: "Rename", symbol: "pencil", action: #selector(rename))
-        configureActionButton(moveButton, title: "Move Window", symbol: "rectangle.on.rectangle", action: #selector(moveWindow))
-        configureActionButton(pinButton, title: "Pin Window", symbol: "pin", action: #selector(pinWindow))
+        renameButton.action = { [weak self] in self?.onRename?() }
+        moveButton.action = { [weak self] in self?.onMoveWindow?() }
+        pinButton.action = { [weak self] in self?.onPinWindow?() }
         let actionStack = NSStackView(views: [renameButton, moveButton, pinButton])
         actionStack.orientation = .horizontal
         actionStack.distribution = .fillEqually
@@ -311,8 +420,10 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
         moveButton.isEnabled = snapshot.moveWindowEnabled
         moveButton.toolTip = snapshot.moveWindowEnabled ? "Choose a desktop for the focused window" : "Enable window moving in Settings"
         pinButton.isEnabled = snapshot.pinWindowEnabled
-        pinButton.title = snapshot.currentWindowPinned ? "Unpin Window" : "Pin Window"
-        pinButton.image = NSImage(systemSymbolName: snapshot.currentWindowPinned ? "pin.slash" : "pin", accessibilityDescription: nil)
+        pinButton.configure(
+            title: snapshot.currentWindowPinned ? "Unpin Window" : "Pin Window",
+            symbol: snapshot.currentWindowPinned ? "pin.slash" : "pin"
+        )
         pinButton.toolTip = snapshot.pinWindowEnabled ? "Keep the focused window above others" : "Enable window pinning in Settings"
 
         let enabledFeatures: [String] = [
@@ -376,15 +487,15 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
             displayLabel.textColor = .secondaryLabelColor
             displayLabel.setContentHuggingPriority(.required, for: .vertical)
             displayLabel.heightAnchor.constraint(equalToConstant: 24).isActive = true
-            displayLabel.widthAnchor.constraint(equalTo: desktopStack.widthAnchor).isActive = true
             desktopStack.addArrangedSubview(displayLabel)
+            displayLabel.widthAnchor.constraint(equalTo: desktopStack.widthAnchor).isActive = true
             contentHeight += 28
 
             for item in matches {
                 let row = WorkspacePopoverRowView(item: item)
                 row.action = { [weak self] in self?.onNavigate?(item.globalPosition) }
-                row.widthAnchor.constraint(equalTo: desktopStack.widthAnchor).isActive = true
                 desktopStack.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: desktopStack.widthAnchor).isActive = true
                 contentHeight += 48
                 resultCount += 1
             }
@@ -395,8 +506,8 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
             empty.alignment = .center
             empty.textColor = .secondaryLabelColor
             empty.heightAnchor.constraint(equalToConstant: 70).isActive = true
-            empty.widthAnchor.constraint(equalTo: desktopStack.widthAnchor).isActive = true
             desktopStack.addArrangedSubview(empty)
+            empty.widthAnchor.constraint(equalTo: desktopStack.widthAnchor).isActive = true
             contentHeight = 70
         }
 
@@ -407,20 +518,6 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
         desktopStack.autoresizingMask = [.width, .height]
     }
 
-    private func configureActionButton(_ button: NSButton, title: String, symbol: String, action: Selector) {
-        button.title = title
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        button.imagePosition = .imageAbove
-        button.imageScaling = .scaleProportionallyDown
-        button.font = .systemFont(ofSize: 12)
-        button.bezelStyle = .rounded
-        button.target = self
-        button.action = action
-    }
-
-    @objc private func rename() { onRename?() }
-    @objc private func moveWindow() { onMoveWindow?() }
-    @objc private func pinWindow() { onPinWindow?() }
     @objc private func openSettings() { onSettings?() }
 
     @objc private func showMoreMenu() {
@@ -537,7 +634,6 @@ final class WorkspacePopoverController: NSObject, NSPopoverDelegate {
         previousApplication = NSWorkspace.shared.frontmostApplication
         restorePreviousApplication = true
         refresh()
-        NSApp.activate(ignoringOtherApps: true)
 
         if atCursor || statusButton == nil {
             let point = NSEvent.mouseLocation
@@ -561,6 +657,7 @@ final class WorkspacePopoverController: NSObject, NSPopoverDelegate {
         } else if let statusButton {
             popover.show(relativeTo: statusButton.bounds, of: statusButton, preferredEdge: .minY)
         }
+        NSApp.activate(ignoringOtherApps: true)
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }

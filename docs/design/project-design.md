@@ -37,8 +37,8 @@ Jumpee is a lightweight native macOS menu bar application that allows users to a
    - Applies Settings changes immediately through the existing configuration and manager objects
 
 4. **WorkspacePopoverController** - Visual workspace popover:
-   - Presents the current desktop, display name, searchable desktop rows, shortcuts, and current selection
-   - Navigates on row selection and provides large Rename, Move Window, and Pin Window actions
+   - Presents the current desktop, display name, searchable desktop rows, larger legible display symbols, shortcuts, and current selection
+   - Navigates on row selection and provides full-card Rename, Move Window, and Pin Window controls with explicit centered icon-and-label layouts
    - Keeps Settings in the footer and About, Unpin All, and Quit in the compact overflow menu
    - Anchors to the status item when clicked and to the pointer when opened by a cursor-configured hotkey
 

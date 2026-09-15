@@ -287,10 +287,10 @@ Advanced Settings reports Accessibility, Mission Control shortcut, and Screen Re
 Renaming uses a compact native panel with a focused name field, Return-to-rename, Escape-to-cancel, a standard primary Rename button, and a visually separate Remove Name action.
 
 ### FR-65: Searchable Display-Grouped Desktop List
-The popover groups desktop rows by physical display and filters them immediately by custom name or desktop number. Each row shows its local position, resolved name, available Command-number shortcut, and a checkmark for the current desktop. Selecting a row closes the popover and navigates to that desktop.
+The popover groups desktop rows by physical display and filters them immediately by custom name or desktop number. Each row shows a clearly legible 17-point medium-weight display symbol in a 24×24 frame, its local position, resolved name, available Command-number shortcut, and a checkmark for the current desktop. Selecting a row closes the popover and navigates to that desktop.
 
 ### FR-66: Popover Actions and Status
-The popover presents large Rename, Move Window, and Pin/Unpin Window actions. Disabled features remain visible with explanatory tooltips. A footer summarizes the overlay and input-source-indicator state and opens Settings. A compact overflow menu contains About, Quit, and Unpin All when applicable.
+The popover presents large Rename, Move Window, and Pin/Unpin Window action cards. Each card has an explicit centered icon-and-label layout contained within a full-card border and click target, plus hover, disabled, tooltip, and accessibility states. Disabled features remain visible with explanatory tooltips. A footer summarizes the overlay and input-source-indicator state and opens Settings. A compact overflow menu contains About, Quit, and Unpin All when applicable.
 
 ### FR-67: Contextual Popover Placement
 Clicking the visible status item anchors the popover beneath the menu bar item. Opening it through the global shortcut respects the existing dropdown-location preference: it anchors at the pointer when configured or at the status item otherwise. Closing or completing a transient action restores focus to the previously active application when appropriate.
