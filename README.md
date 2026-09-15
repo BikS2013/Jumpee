@@ -103,10 +103,9 @@ Desktop switching requires **Ctrl+1** through **Ctrl+9** shortcuts:
 | Open desktop list | **Cmd+J** (global hotkey) or click the menu bar item |
 | Jump to a desktop | **Cmd+1..9** while menu is open, or click it |
 | Rename current desktop | **Cmd+N** or click "Rename Current Desktop..." |
-| Toggle space number | Click "Hide/Show Space Number" |
-| Toggle overlay | Click "Enable/Disable Overlay" |
-| Edit config | **Cmd+,** from menu, or edit `~/.tool-agents/jumpee/config.json` |
-| Reload config | **Cmd+R** from menu |
+| Open Settings | **Cmd+,** or click "Settings…" |
+| Configure menu, features, appearance, or hotkeys | Use the corresponding Settings pane |
+| Edit or reload the config file | Use **Settings > Advanced** |
 | Quit | **Cmd+Q** from menu |
 
 ## Configuration

@@ -1,6 +1,6 @@
 # Jumpee - Functional Requirements
 
-**Last updated:** 2026-04-10 (v1.5.0 input-source-indicator proposed)
+**Last updated:** 2026-09-15 (macOS-native settings UI implemented)
 
 ---
 
@@ -28,10 +28,10 @@ A configurable global hotkey (default: Cmd+J) opens the Jumpee dropdown from any
 A transparent text overlay displays the current space name on the desktop background. The overlay is fully configurable: opacity, font, font size, font weight, position (9 anchor points), text color, and margin.
 
 ### FR-8: Configuration File
-All settings are stored in `~/.tool-agents/jumpee/config.json`. The config file can be opened from the menu (Cmd+,) and reloaded (Cmd+R) without restarting the app.
+All settings are stored in `~/.tool-agents/jumpee/config.json`. The Advanced Settings pane can reveal the file in Finder and reload it without restarting the app. Command+Comma opens the native Settings window rather than the raw file.
 
 ### FR-9: No Dock Icon
-Jumpee runs as a menu bar-only app (LSUIElement) with no Dock icon and no main window.
+Jumpee runs as an LSUIElement accessory app with no Dock icon. It has no persistent main window; the native Settings window and focused rename panel appear only when requested.
 
 ---
 
@@ -65,7 +65,7 @@ A "Move Window To..." submenu in the Jumpee dropdown lists all desktops on the a
 Jumpee detects whether the required "Move window to Desktop N" system shortcuts are enabled by reading the `com.apple.symbolichotkeys` preferences plist. If not enabled, a setup guidance dialog is shown.
 
 ### FR-17: Setup Guidance for Window Moving
-A "Set Up Window Moving..." menu item provides step-by-step instructions for enabling the required system shortcuts, with an "Open System Settings" button that navigates directly to the Keyboard Shortcuts pane.
+The Advanced Settings pane reports whether Mission Control desktop-switching shortcuts are detected and provides a "Review Shortcuts..." button that opens the relevant System Settings pane.
 
 ### FR-18: Move-and-Follow Behavior
 When a window is moved, the user's view automatically switches to the target desktop. This is the only supported behavior -- "move without following" is not available due to macOS 15+ system restrictions.
@@ -92,39 +92,39 @@ The move-window hotkey is independently configurable via the `moveWindowHotkey` 
 Both the dropdown hotkey (default Cmd+J) and the move-window hotkey (default Cmd+M) work simultaneously. They are dispatched via distinct `EventHotKeyID.id` values within a shared Carbon event handler.
 
 ### FR-24: Hotkey Reload
-Reloading config (Cmd+R) re-registers both hotkeys with any updated key/modifier combinations.
+Reloading the configuration from Advanced Settings re-registers all global hotkeys with any updated key/modifier combinations.
 
 ---
 
-## 5. Hotkey Configuration UI (Proposed - plan-005)
+## 5. Hotkey Configuration UI (Implemented; modernized 2026-09-15)
 
 ### FR-25: Hotkey Menu Section
-A "Hotkeys:" section in the Jumpee dropdown menu displays the current hotkey combination for each configurable hotkey. The section appears between the overlay toggle and the "Open Config File..." item.
+The Shortcuts Settings pane displays all three configurable global shortcuts and the fixed menu-only shortcuts. Hotkey configuration is kept out of the daily-action menu.
 
 ### FR-26: Hotkey Editor Dialog
-Clicking a hotkey menu item opens a modal NSAlert with an accessory view containing a key text field and modifier checkboxes (Command, Control, Option, Shift). The dialog has "Save", "Reset to Default", and "Cancel" buttons.
+Each configurable shortcut uses a recorder-style control. Clicking the control enters recording mode and captures the complete modifier-and-key chord directly, including supported named keys such as Space, Return, Tab, and Escape. Escape without modifiers cancels recording.
 
 ### FR-27: Hotkey Validation
 The editor validates that: (a) at least one modifier is selected, (b) the key is in the supported key map (a-z, 0-9, space, return, tab, escape), and (c) the combination does not conflict with the other Jumpee hotkey. Invalid input produces a descriptive error alert.
 
 ### FR-28: Immediate Hotkey Application
-Saving a hotkey via the editor dialog immediately updates the config file and re-registers the hotkey -- no manual reload (Cmd+R) is required.
+Recording a hotkey immediately updates the config file and re-registers the hotkey; no manual reload is required.
 
 ### FR-29: Hotkey Reset to Default
-The "Reset to Default" button restores the original hotkey for the selected slot: Cmd+J for the dropdown hotkey, Cmd+M for the move-window hotkey.
+Each shortcut row includes a reset control, and the pane provides "Restore Defaults" for all shortcut slots. Reset values apply and re-register immediately.
 
 ### FR-30: Conditional Move Window Hotkey Editor
-The move-window hotkey editor menu item is only visible when `moveWindow.enabled` is true in the config.
+The move-window and pin-window recorder controls remain visible for discoverability but are disabled when their corresponding feature is disabled in General Settings.
 
 ---
 
-## 6. About Dialog (Proposed - plan-005)
+## 6. About Panel (Implemented; modernized 2026-09-15)
 
 ### FR-31: About Menu Item
-An "About Jumpee..." menu item is placed after the "Jumpee" header and before the "Desktops:" separator. It has no keyboard shortcut.
+An "About Jumpee" item appears with the other application-level commands near the bottom of the focused dropdown menu.
 
 ### FR-32: About Dialog Content
-The About dialog is an `NSAlert` with `.informational` style displaying: the app version (read from `Bundle.main.infoDictionary["CFBundleShortVersionString"]`, fallback to "dev"), a brief app description, macOS setup requirements (Accessibility permissions, Desktop Switching Shortcuts, Window Moving Shortcuts), and configuration file location with menu shortcuts.
+Jumpee uses the standard macOS About panel with its runtime version and a concise description. Setup requirements and configuration-file actions live in Advanced Settings instead of overloading the About experience.
 
 ### FR-33: Runtime Version Source
 The version string is read from the app bundle's Info.plist at runtime, not hardcoded. When running unpackaged, "dev" is shown.
@@ -134,7 +134,7 @@ The version string is read from the app bundle's Info.plist at runtime, not hard
 ## 7. Non-Functional Requirements
 
 ### NFR-1: Lightweight Footprint
-Jumpee is a single-file Swift app (~130KB compiled) with no external dependencies. The build uses a single `swiftc` invocation via `build.sh`.
+Jumpee is a small native Swift app with no external dependencies. The build uses one `swiftc` invocation over the Swift files under `Sources/` via `build.sh`.
 
 ### NFR-2: Accessibility Permissions
 Jumpee requires Accessibility permissions for CGEvent synthesis (space navigation and window moving). The app prompts for this on first launch.
@@ -189,7 +189,7 @@ When absent or `enabled: false`, the menu items and hotkey for pin-on-top are hi
 ### FR-41: Pin Window Global Hotkey
 A configurable global hotkey (default: Ctrl+Cmd+P) toggles pin state on the focused window. The hotkey is stored in `pinWindowHotkey` in the config, using the same `HotkeyConfig` schema as the existing `hotkey` and `moveWindowHotkey` fields. Registered as Carbon hotkey id=3 in the shared event handler.
 
-**Hotkey lifecycle:** Registered only when `pinWindow.enabled` is `true`. Re-registered on config reload (Cmd+R). Unregistered when the feature is disabled.
+**Hotkey lifecycle:** Registered only when `pinWindow.enabled` is `true`. Re-registered on Settings changes or configuration reload. Unregistered when the feature is disabled.
 
 ### FR-42: Pin/Unpin Menu Item
 A menu item in the Jumpee dropdown toggles the pin state of the focused window:
@@ -199,7 +199,7 @@ A menu item in the Jumpee dropdown toggles the pin state of the focused window:
 - Only visible when `pinWindow.enabled` is `true`
 
 ### FR-43: Pin Window Hotkey Editor
-A "Pin Window Hotkey: Ctrl+Cmd+P..." entry appears in the Hotkeys section of the menu (alongside the dropdown and move-window hotkey entries). Clicking it opens the same hotkey editor dialog used for the other hotkeys. Includes 3-way conflict checking against the dropdown and move-window hotkeys. Only visible when `pinWindow.enabled` is `true`.
+The Shortcuts Settings pane includes the pin-window recorder alongside the dropdown and move-window recorders. It performs three-way conflict checking and is enabled only while the pin feature is enabled.
 
 ### FR-44: Pin Cleanup on Quit
 When Jumpee quits (Cmd+Q), all pinned windows are restored to normal z-order (`kCGNormalWindowLevel`) before the application terminates. This ensures no windows are left permanently floating after Jumpee exits.
@@ -250,10 +250,38 @@ When `enabled` is `false` or the section is absent, the input source indicator i
 The `inputSourceIndicator` section supports optional appearance customization: `fontSize` (default 60), `fontName` (default "Helvetica Neue"), `fontWeight` (default "bold"), `textColor` (default "#FFFFFF"), `opacity` (default 0.8), `backgroundColor` (default "#000000"), `backgroundOpacity` (default 0.3), `backgroundCornerRadius` (default 10), and `verticalOffset` (default 0). These defaults are a documented exception to the no-default-fallback rule (see Issues - Pending Items.md, item 16).
 
 ### FR-54: Menu Toggle
-A menu item in the Jumpee dropdown (tag 102) allows toggling the input source indicator on/off. When enabled, the item reads "Disable Input Source Indicator"; when disabled, "Enable Input Source Indicator". This follows the same pattern as the overlay toggle (tag 101).
+General Settings includes an immediate input-source-indicator switch. The daily-action menu does not contain persistent preference toggles.
 
 ### FR-55: Config Reload Support
-When the user reloads config (Cmd+R or "Reload Config" menu item), the input source indicator respects the updated configuration: enabling, disabling, or restyling as needed. No app restart is required.
+When the user chooses "Reload Now" in Advanced Settings, the input source indicator respects the updated configuration: enabling, disabling, or restyling as needed. No app restart is required.
 
 ### FR-56: No Additional Permissions
 Monitoring the keyboard input source does not require Accessibility, Screen Recording, or any special macOS permissions beyond what Jumpee already needs. The TIS APIs are available without entitlements.
+
+---
+
+## 10. macOS-Native Interface (Implemented 2026-09-15)
+
+### FR-57: Focused Daily-Action Menu
+The status-item menu prioritizes desktop navigation, rename, move-window, and pin-window actions. Persistent settings, permission guidance, hotkey editors, raw configuration commands, and lengthy help content are excluded from the primary workflow.
+
+### FR-58: Current Desktop Context
+The top of the menu displays the current desktop name as a bold header and a secondary line containing its local desktop number and display name. The status item uses the system display symbol beside its existing title.
+
+### FR-59: Native Settings Window
+Command+Comma and "Settings…" open a non-resizable, non-minimizable macOS Settings window with a stable, noncustomizable toolbar. The panes are General, Appearance, Shortcuts, and Advanced. The window title and size follow the selected pane.
+
+### FR-60: Immediate Settings Application
+Settings controls write through the existing `JumpeeConfig` model and take effect immediately. There is no Apply button and no secondary preference store. Existing JSON keys and optional sections remain compatible.
+
+### FR-61: General Settings
+General Settings controls menu-bar visibility, desktop-number visibility, dropdown location, overlay enablement, input-source-indicator enablement, move-window enablement, and pin-window enablement.
+
+### FR-62: Appearance Settings and Preview
+Appearance Settings exposes the primary overlay and input-source visual options through native controls and provides a live, noninteractive preview. Less common per-language mappings and typography details remain available in the JSON configuration. Restoring defaults preserves each feature's enabled state and preserves per-language input labels/colors.
+
+### FR-63: Advanced Setup Status
+Advanced Settings reports Accessibility, Mission Control shortcut, and Screen Recording status, linking or prompting through the corresponding macOS system facilities. It also reveals and reloads the existing configuration file.
+
+### FR-64: Focused Rename Panel
+Renaming uses a compact native panel with a focused name field, Return-to-rename, Escape-to-cancel, a standard primary Rename button, and a visually separate Remove Name action.

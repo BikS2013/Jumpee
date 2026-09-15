@@ -8,7 +8,7 @@
 
 This is the only configuration method. There are no environment variables, CLI parameters, or fallback values. If the config file is missing, Jumpee creates it with default values on first run.
 
-The config file can be opened directly from Jumpee's menu (Cmd+, or "Open Config File..."). After editing, use "Reload Config" (Cmd+R) to apply changes without restarting.
+Command+Comma opens Jumpee Settings. The config file can be revealed from the Advanced pane; after editing, use "Reload Now" in the same pane to apply changes without restarting.
 
 ## Complete Configuration Example
 
@@ -69,7 +69,7 @@ Controls whether the desktop number is shown alongside the custom name in the me
 | `false` | `Browser` |
 
 - **Default**: `true`
-- **How to toggle**: Click "Hide Space Number" / "Show Space Number" in the menu.
+- **How to toggle**: Use **Settings > General > Show desktop number**.
 
 ### `hotkey` (object)
 
@@ -99,7 +99,7 @@ The global keyboard shortcut to open Jumpee's dropdown menu from anywhere.
 ```
 
 - **Default**: Cmd+J
-- **How to change**: Click "Dropdown Hotkey: ..." in the Hotkeys section of the menu, or edit the config file and reload (Cmd+R).
+- **How to change**: Use the **Open Jumpee** recorder in **Settings > Shortcuts**, or edit the config file and choose **Reload Now** in Advanced Settings.
 - **Implementation**: Uses Carbon `RegisterEventHotKey` API. Does not require Accessibility permissions.
 - **Note**: Avoid hotkeys that conflict with other apps. If the hotkey doesn't work, another app may have claimed it.
 
@@ -115,7 +115,7 @@ The global keyboard shortcut to open the "Move Window to Desktop N" popup menu a
 Same supported key and modifier values as the `hotkey` property above.
 
 - **Default**: Cmd+M (when omitted from config and `moveWindow.enabled` is `true`). This is a documented exception to the no-default-fallback rule.
-- **How to change**: Click "Move Window Hotkey: ..." in the Hotkeys section of the menu, or edit the config file and reload (Cmd+R).
+- **How to change**: Use the **Move Current Window** recorder in **Settings > Shortcuts**, or edit the config file and reload it from Advanced Settings.
 - **Note**: The default Cmd+M conflicts with the system "Minimize" shortcut. Consider using Cmd+Shift+M or another combination to avoid this conflict.
 
 ### `overlay` (object)
@@ -173,7 +173,7 @@ Controls the transparent text watermark displayed on the desktop showing the cur
 - `"#FF6600"` (orange)
 - `"#4A90D9"` (blue)
 
-- **How to toggle**: Click "Enable Overlay" / "Disable Overlay" in the menu.
+- **How to toggle**: Use **Settings > General > Desktop overlay**. Appearance controls are in **Settings > Appearance**.
 - **Recommended opacity**: 0.10-0.20 for subtle watermark, 0.30-0.50 for more visible text.
 
 ## System Requirements
@@ -202,7 +202,7 @@ Controls the pin-window-on-top feature. When enabled, you can pin any window to 
 |----------|------|-------------|---------|
 | `enabled` | boolean | Enable/disable the pin window feature | Feature disabled when absent |
 
-- **How to enable**: Add `"pinWindow": { "enabled": true }` to your config file, then reload (Cmd+R).
+- **How to enable**: Use **Settings > General > Pin windows on top**.
 - **How it works**: Jumpee captures the target window's image and displays it in its own floating window. The overlay is click-through — clicks pass to the real window underneath.
 - **Required permission**: Screen Recording (System Settings > Privacy & Security > Screen Recording). Jumpee prompts you if this is missing.
 - **Note**: Pin state is in-memory only and does not persist across Jumpee restarts. All windows are unpinned when Jumpee quits.
@@ -219,7 +219,7 @@ The global keyboard shortcut to toggle pin/unpin on the currently focused window
 Same supported key and modifier values as the `hotkey` property above.
 
 - **Default**: Ctrl+Cmd+P (when omitted from config and `pinWindow.enabled` is `true`). This is a documented exception to the no-default-fallback rule.
-- **How to change**: Click "Pin Window Hotkey: ..." in the Hotkeys section of the menu, or edit the config file and reload (Cmd+R).
+- **How to change**: Use the **Pin or Unpin Window** recorder in **Settings > Shortcuts**, or edit the config file and reload it from Advanced Settings.
 - **Behavior**: Press once to pin the focused window on top. Press again (while the same window is focused) to unpin it. Use "Unpin All Windows" in the menu to release all pinned windows at once.
 
 ### `inputSourceIndicator` (object, optional)
@@ -239,8 +239,8 @@ Controls the input source (keyboard language) indicator overlay displayed below 
 | `backgroundCornerRadius` | number | Corner radius for background pill (0 = square) | `10` |
 | `verticalOffset` | number | Additional pixels below the menu bar | `0` |
 
-- **How to enable**: Add `"inputSourceIndicator": { "enabled": true }` to your config file, then reload (Cmd+R).
-- **How to toggle**: Click "Enable Input Source Indicator" / "Disable Input Source Indicator" in the menu.
+- **How to enable**: Use **Settings > General > Input source indicator**.
+- **How to toggle**: Use **Settings > General > Input source indicator**. Appearance controls are in **Settings > Appearance**.
 - **No additional permissions required**: The TIS (Text Input Source Services) APIs do not require Accessibility, Screen Recording, or any special permissions.
 - **Coexistence**: Works independently alongside the desktop watermark overlay. Both can be enabled simultaneously.
 - **Note**: These default values are a documented exception to the no-default-fallback rule (see Issues - Pending Items.md, item 16).
@@ -337,14 +337,15 @@ Controls the input source (keyboard language) indicator overlay displayed below 
 | Change | How to apply |
 |--------|-------------|
 | Rename a desktop | Use menu "Rename Current Desktop..." — saves automatically |
-| Toggle space number | Use menu toggle — saves automatically |
-| Toggle overlay | Use menu toggle — saves automatically |
-| Change dropdown hotkey | Click "Dropdown Hotkey: ..." in menu, or edit config + Cmd+R |
-| Change move-window hotkey | Click "Move Window Hotkey: ..." in menu, or edit config + Cmd+R |
-| Change pin-window hotkey | Click "Pin Window Hotkey: ..." in menu, or edit config + Cmd+R |
-| Enable pin window | Add `"pinWindow": {"enabled": true}` to config, then Cmd+R |
-| Change overlay style | Edit config file, then Cmd+R to reload |
-| Change font weight | Edit config file, then Cmd+R to reload |
-| Enable input source indicator | Add `"inputSourceIndicator": {"enabled": true}` to config, then Cmd+R |
-| Toggle input source indicator | Use menu toggle — saves automatically |
-| Change indicator style | Edit config file, then Cmd+R to reload |
+| Toggle space number | Settings > General — saves automatically |
+| Toggle overlay | Settings > General — saves automatically |
+| Change overlay appearance | Settings > Appearance — saves automatically |
+| Change dropdown hotkey | Settings > Shortcuts, or edit config + Advanced > Reload Now |
+| Change move-window hotkey | Settings > Shortcuts, or edit config + Advanced > Reload Now |
+| Change pin-window hotkey | Settings > Shortcuts, or edit config + Advanced > Reload Now |
+| Enable pin window | Settings > General |
+| Change overlay style | Settings > Appearance, or edit config + Advanced > Reload Now |
+| Change font weight | Edit config + Advanced > Reload Now |
+| Enable input source indicator | Settings > General |
+| Toggle input source indicator | Settings > General — saves automatically |
+| Change indicator style | Settings > Appearance, or edit config + Advanced > Reload Now |

@@ -758,8 +758,8 @@ No keyboard shortcut for the About item (infrequently used).
 ### 7.1 Complete Menu Structure After v1.3.0
 
 ```
-About Jumpee...                                         (NEW)
 Jumpee (bold header, disabled)
+About Jumpee...                                         (NEW)
 ---
 Desktops:
   [display header, if multi-display]

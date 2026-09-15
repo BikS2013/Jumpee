@@ -12,7 +12,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="Jumpee"
-VERSION="1.7.1"
+VERSION="1.8.0"
 BUILD_DIR="$SCRIPT_DIR/build.noindex"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
@@ -38,7 +38,7 @@ for ARCH in arm64 x86_64; do
         -framework Cocoa \
         -F /System/Library/PrivateFrameworks \
         -o "$BUILD_DIR/$APP_NAME-$ARCH" \
-        "$SCRIPT_DIR/Sources/main.swift"
+        "$SCRIPT_DIR/Sources/"*.swift
 done
 lipo -create "$BUILD_DIR/$APP_NAME-arm64" "$BUILD_DIR/$APP_NAME-x86_64" -output "$MACOS_DIR/$APP_NAME"
 rm -f "$BUILD_DIR/$APP_NAME-arm64" "$BUILD_DIR/$APP_NAME-x86_64"
