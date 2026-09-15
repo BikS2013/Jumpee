@@ -1,0 +1,13 @@
+{
+  "name": "nbg-design",
+  "description": "Use when creating presentations in a design system inspired by the brand image of the National Bank of Greece (NBG), HTML slides (with a built-in right-click menu: in-place text editing with a formatting toolbar, shape resize/move with a shape toolbar, multi-selection with align / distribute / order / group, a structure outline and HTML panel, pinnable, detachable toolbars that follow the selection, an AI assistant panel that sends the slide's screenshot / source / selection and a clipboard image to Anthropic, Azure Anthropic, OpenAI-compatible, Azure OpenAI or DeepSeek endpoints with saved prompts, \"Export to PDF\", \"Save edited copy\", editing of the parts of inline SVGs (icons, diagrams, charts), and a per-deck rebuild script that re-embeds newer versions of those editing tools), updating an existing deck to the skill's current editing tools, slide specifications, PDF exports of HTML decks (one page per slide, aesthetics preserved) — all on the bundled NBG-inspired presentation design system, templates, logos, photography, screenshots, and guardrails. Also ships the BikS2013 personal theme (ink and copper on warm paper, the BikS2013 wheel lockups) for presentations given in a personal capacity, selected per deck with the same templates, scripts and guardrails.",
+  "version": "1.20.0",
+  "author": {
+    "name": "Giorgos Marinos"
+  },
+  "license": "MIT",
+  "keywords": [
+    "nbg",
+    "design"
+  ]
+}

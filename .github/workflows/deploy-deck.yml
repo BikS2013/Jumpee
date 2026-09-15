@@ -1,0 +1,56 @@
+# Builds the Jumpee product deck (deck/jumpee-deck.html) from its sources and publishes it as the
+# repository's GitHub Pages site whenever anything under deck/ changes on the `deck` branch.
+#
+# The site is https://biks2013.github.io/Jumpee/ — index.html is the self-contained deck.
+# The build uses the vendored copy of the nbg-design skill's scripts (deck/tools/nbg-design); refresh it
+# with deck/tools/sync-nbg-design.sh after updating the plugin. The PDF is not rebuilt here.
+name: Deploy deck to GitHub Pages
+
+on:
+  push:
+    branches: [deck]
+    paths:
+      - deck/**
+      - .github/workflows/deploy-deck.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the deck HTML
+        env:
+          NBG_DESIGN_SKILL: ${{ github.workspace }}/deck/tools/nbg-design
+        run: ./deck/build.sh --no-pdf
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp deck/jumpee-deck.html _site/index.html
+          touch _site/.nojekyll
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
