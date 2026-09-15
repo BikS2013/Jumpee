@@ -16,7 +16,7 @@
 #
 # Usage: bash package.sh [--dmg-only]
 #   --dmg-only   Skip the build, app signing, zip and app notarization; reuse the
-#                existing (already signed and stapled) build/Jumpee.app and only
+#                existing (already signed and stapled) build.noindex/Jumpee.app and only
 #                produce the disk image.
 # The version comes from build.sh (VERSION=...), which also stamps Info.plist.
 set -e
@@ -24,7 +24,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="Jumpee"
 VERSION="$(sed -n 's/^VERSION="\(.*\)"$/\1/p' "$SCRIPT_DIR/build.sh")"
-BUILD_DIR="$SCRIPT_DIR/build"
+BUILD_DIR="$SCRIPT_DIR/build.noindex"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 DIST_DIR="$SCRIPT_DIR/dist"
 ZIP_FILE="$DIST_DIR/${APP_NAME}-${VERSION}.zip"

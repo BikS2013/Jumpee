@@ -51,17 +51,17 @@ Then:
 ```bash
 cd Jumpee
 bash build.sh
-open build/Jumpee.app
+open build.noindex/Jumpee.app
 ```
 
 To install the local build:
 ```bash
-cp -r build/Jumpee.app /Applications/
+cp -r build.noindex/Jumpee.app /Applications/
 ```
 
 ### Build a signed release package
 
-`package.sh` builds, signs, notarizes, and staples the app, then produces `dist/Jumpee-<version>.zip` and a signed, notarized drag-to-Applications disk image `dist/Jumpee-<version>.dmg`. Pass `--dmg-only` to rebuild just the disk image from the existing stapled `build/Jumpee.app`. The version is set by `VERSION=` in `build.sh`. A Developer ID Application identity is required (the script refuses to package an ad-hoc-signed build), and a notarytool keychain profile is needed for notarization:
+`package.sh` builds, signs, notarizes, and staples the app, then produces `dist/Jumpee-<version>.zip` and a signed, notarized drag-to-Applications disk image `dist/Jumpee-<version>.dmg`. Pass `--dmg-only` to rebuild just the disk image from the existing stapled `build.noindex/Jumpee.app`. The version is set by `VERSION=` in `build.sh`. A Developer ID Application identity is required (the script refuses to package an ad-hoc-signed build), and a notarytool keychain profile is needed for notarization:
 ```bash
 CODESIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)" NOTARY_PROFILE=jumpee-notary bash package.sh
 ```

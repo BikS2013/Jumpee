@@ -1,5 +1,6 @@
 #!/bin/bash
-# Builds Jumpee.app into ./build.
+# Builds Jumpee.app into ./build.noindex (the .noindex suffix keeps Spotlight from
+# indexing the build output, so only /Applications/Jumpee.app shows up in Spotlight).
 #
 # Signing:
 #   - Default (development): ad-hoc signature, so Accessibility permissions
@@ -12,7 +13,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="Jumpee"
 VERSION="1.6.0"
-BUILD_DIR="$SCRIPT_DIR/build"
+BUILD_DIR="$SCRIPT_DIR/build.noindex"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
