@@ -30,42 +30,47 @@ Jumpee is a lightweight native macOS menu bar application that allows users to a
    - Hotkey settings (key, modifiers)
    - Auto-saves on every change
 
-3. **MenuBarController** - The focused menu bar UI:
+3. **MenuBarController** - The menu bar and visual workspace UI coordinator:
    - Shows a system display symbol and the current space's custom name (or "Desktop N" if unnamed)
-   - Dropdown lists all spaces — click to navigate
-   - Keeps only frequent and contextual actions: rename, move window, pin window, Settings, About, and Quit
+   - Opens a transient visual workspace popover from the status item or global hotkey
+   - Supplies display-grouped desktop data, current-desktop context, feature status, and action callbacks to the popover
    - Applies Settings changes immediately through the existing configuration and manager objects
 
-4. **JumpeeSettingsWindowController** - Native macOS Settings:
+4. **WorkspacePopoverController** - Visual workspace popover:
+   - Presents the current desktop, display name, searchable desktop rows, shortcuts, and current selection
+   - Navigates on row selection and provides large Rename, Move Window, and Pin Window actions
+   - Keeps Settings in the footer and About, Unpin All, and Quit in the compact overflow menu
+   - Anchors to the status item when clicked and to the pointer when opened by a cursor-configured hotkey
+
+5. **JumpeeSettingsWindowController** - Native macOS Settings:
    - Uses a stable toolbar with General, Appearance, Shortcuts, and Advanced panes
    - Resizes to each pane and updates the window title to match the selected pane
    - Writes directly through `JumpeeConfig`; no duplicate preference store or Apply step
    - Provides a live appearance preview, direct shortcut recording, permission status, and config-file actions
 
-5. **RenameDesktopPanelController** - Focused rename workflow:
+6. **RenameDesktopPanelController** - Focused rename workflow:
    - Presents a compact native modal panel rather than a generic three-button alert
    - Supports Return to rename, Escape to cancel, and a separate Remove Name action
 
-6. **OverlayManager** - Desktop watermark:
+7. **OverlayManager** - Desktop watermark:
    - Single transparent window at desktop level
    - Joins all spaces (`canJoinAllSpaces`)
    - Updates text on space change
    - Click-through (ignores mouse events)
    - Configurable font, size, weight, color, opacity, position, margin
 
-7. **GlobalHotkeyManager** - Keyboard shortcut:
+8. **GlobalHotkeyManager** - Keyboard shortcut:
    - Uses Carbon `RegisterEventHotKey` API (no accessibility permissions needed)
    - Default: Cmd+J
    - Configurable key and modifier combination
-   - Opens the status item menu programmatically
+   - Opens or closes the visual workspace popover programmatically
 
-8. **SpaceNavigator** - Desktop switching:
+9. **SpaceNavigator** - Desktop switching:
    - Uses `osascript` subprocess to send Ctrl+number keystrokes via System Events
-   - Closes menu before switching to avoid conflicts
-   - Reopens menu after switch completes
+   - Closes the popover before switching to avoid focus conflicts
    - Requires "Switch to Desktop N" shortcuts enabled in System Settings
 
-9. **AppDelegate** - Application lifecycle:
+10. **AppDelegate** - Application lifecycle:
    - LSUIElement (no dock icon)
    - Listens to `NSWorkspace.activeSpaceDidChangeNotification`
    - Updates menu bar and overlay on space change
@@ -83,18 +88,18 @@ These are private CoreGraphics APIs. They work on macOS but are not App Store sa
 ### Data Flow
 
 1. App starts -> registers Carbon hotkey, creates overlay, registers for space change notifications
-2. User presses Cmd+J -> menu opens showing all desktops
-3. User clicks a desktop -> menu closes -> `osascript` sends Ctrl+N -> space switches -> menu reopens
-4. Space changes -> `SpaceDetector.getCurrentSpaceIndex()` called for display position, `getCurrentSpaceID()` called for config key lookup -> name looked up by space ID -> menu bar title and overlay updated
+2. User presses Cmd+J or clicks the status item -> visual workspace popover opens showing searchable, display-grouped desktops
+3. User clicks a desktop row -> popover closes -> `osascript` sends Ctrl+N -> space switches
+4. Space changes -> `SpaceDetector.getCurrentSpaceIndex()` called for display position, `getCurrentSpaceID()` called for config key lookup -> name looked up by space ID -> menu bar title, popover snapshot, and overlay updated
 5. User renames desktop -> space ID retrieved via `getCurrentSpaceID()` -> config saved to `~/.tool-agents/jumpee/config.json` with space ID as key -> UI updated
 6. First launch after migration -> position-based config keys detected -> mapped to space IDs using current space ordering -> config rewritten with space-ID keys
 7. User opens Settings -> selected pane reloads from `JumpeeConfig` -> control changes save immediately -> menu title, overlays, indicator, visibility, and registered hotkeys refresh through `MenuBarController.applyConfig`
 
 ## macOS-Native Interface (2026-09-15)
 
-Jumpee follows a focused utility model: the status-item menu contains desktop navigation and current-context actions, while persistent preferences live in a standard auxiliary Settings window. The Settings toolbar is noncustomizable and remains visible across General, Appearance, Shortcuts, and Advanced panes. Each pane has a purpose-specific size and title.
+Jumpee follows a visual workspace utility model: the status item opens a transient native popover containing current-desktop context, search, display-grouped desktop rows, shortcuts, and the three primary contextual actions. Persistent preferences remain in a standard auxiliary Settings window. The Settings toolbar is noncustomizable and remains visible across General, Appearance, Shortcuts, and Advanced panes. Each pane has a purpose-specific size and title.
 
-The interface remains AppKit-based and dependency-free. `Sources/main.swift` retains the application services and menu orchestration; `Sources/SettingsUI.swift` owns the Settings window, panes, live preview, and shortcut recorder; `Sources/RenamePanel.swift` owns the rename interaction. `build.sh` compiles every Swift source under `Sources/` into the existing universal binary.
+The interface remains AppKit-based and dependency-free. `Sources/main.swift` retains the application services and popover orchestration; `Sources/WorkspacePopover.swift` owns the visual workspace popover; `Sources/SettingsUI.swift` owns the Settings window, panes, live preview, and shortcut recorder; `Sources/RenamePanel.swift` owns the rename interaction. `build.sh` compiles every Swift source under `Sources/` into the existing universal binary.
 
 Configuration compatibility is unchanged. Controls mutate the existing `JumpeeConfig` value, save to `~/.tool-agents/jumpee/config.json`, and immediately update the relevant runtime managers. Advanced users can still reveal and edit the JSON file from Advanced Settings.
 

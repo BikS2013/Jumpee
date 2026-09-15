@@ -1,0 +1,586 @@
+import Cocoa
+
+struct WorkspacePopoverSpaceItem {
+    let spaceID: Int
+    let localPosition: Int
+    let globalPosition: Int
+    let name: String
+    let shortcut: String?
+    let isCurrent: Bool
+}
+
+struct WorkspacePopoverDisplaySection {
+    let name: String
+    let spaces: [WorkspacePopoverSpaceItem]
+}
+
+struct WorkspacePopoverSnapshot {
+    let currentTitle: String
+    let currentSubtitle: String
+    let displays: [WorkspacePopoverDisplaySection]
+    let overlayEnabled: Bool
+    let inputSourceEnabled: Bool
+    let moveWindowEnabled: Bool
+    let pinWindowEnabled: Bool
+    let currentWindowPinned: Bool
+    let pinnedWindowCount: Int
+}
+
+private final class WorkspacePopoverFlippedView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+private final class WorkspacePopoverRowView: NSView {
+    private let actionButton = NSButton()
+    private var trackingAreaReference: NSTrackingArea?
+    private var isHovered = false
+    private let isCurrent: Bool
+
+    var action: (() -> Void)?
+
+    init(item: WorkspacePopoverSpaceItem) {
+        isCurrent = item.isCurrent
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 9
+
+        let icon = NSImageView(image: NSImage(systemSymbolName: "display", accessibilityDescription: nil) ?? NSImage())
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        icon.contentTintColor = item.isCurrent ? .controlAccentColor : .labelColor
+
+        let number = NSTextField(labelWithString: String(item.localPosition))
+        number.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        number.alignment = .right
+
+        let name = NSTextField(labelWithString: item.name)
+        name.font = .systemFont(ofSize: 13)
+        name.lineBreakMode = .byTruncatingTail
+
+        let shortcut = NSTextField(labelWithString: item.shortcut ?? "")
+        shortcut.font = .systemFont(ofSize: 12)
+        shortcut.textColor = .secondaryLabelColor
+        shortcut.alignment = .right
+
+        let check = NSImageView()
+        if item.isCurrent {
+            check.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: "Current desktop")
+            check.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+            check.contentTintColor = .controlAccentColor
+        }
+
+        for child in [icon, number, name, shortcut, check, actionButton] {
+            child.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(child)
+        }
+
+        actionButton.title = "Switch to Desktop \(item.localPosition), \(item.name)"
+        actionButton.isBordered = false
+        actionButton.isTransparent = true
+        actionButton.target = self
+        actionButton.action = #selector(performAction)
+        actionButton.setAccessibilityLabel("Switch to Desktop \(item.localPosition), \(item.name)")
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 44),
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 20),
+            icon.heightAnchor.constraint(equalToConstant: 20),
+            number.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
+            number.centerYAnchor.constraint(equalTo: centerYAnchor),
+            number.widthAnchor.constraint(equalToConstant: 22),
+            name.leadingAnchor.constraint(equalTo: number.trailingAnchor, constant: 12),
+            name.centerYAnchor.constraint(equalTo: centerYAnchor),
+            shortcut.leadingAnchor.constraint(greaterThanOrEqualTo: name.trailingAnchor, constant: 8),
+            shortcut.trailingAnchor.constraint(equalTo: check.leadingAnchor, constant: -10),
+            shortcut.centerYAnchor.constraint(equalTo: centerYAnchor),
+            shortcut.widthAnchor.constraint(equalToConstant: 36),
+            check.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            check.centerYAnchor.constraint(equalTo: centerYAnchor),
+            check.widthAnchor.constraint(equalToConstant: 20),
+            check.heightAnchor.constraint(equalToConstant: 20),
+            actionButton.leadingAnchor.constraint(equalTo: leadingAnchor),
+            actionButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            actionButton.topAnchor.constraint(equalTo: topAnchor),
+            actionButton.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        updateBackground()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference { removeTrackingArea(trackingAreaReference) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaReference = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateBackground()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateBackground()
+    }
+
+    private func updateBackground() {
+        if isCurrent {
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(isHovered ? 0.22 : 0.14).cgColor
+        } else if isHovered {
+            layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+        } else {
+            layer?.backgroundColor = NSColor.clear.cgColor
+        }
+    }
+
+    @objc private func performAction() {
+        action?()
+    }
+}
+
+private final class WorkspacePopoverContentViewController: NSViewController, NSSearchFieldDelegate {
+    private let currentTitle = NSTextField(labelWithString: "")
+    private let currentSubtitle = NSTextField(labelWithString: "")
+    private let searchField = NSSearchField()
+    private let scrollView = NSScrollView()
+    private let documentView = WorkspacePopoverFlippedView()
+    private let desktopStack = NSStackView()
+    private let renameButton = NSButton()
+    private let moveButton = NSButton()
+    private let pinButton = NSButton()
+    private let statusDot = NSView()
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let settingsButton = NSButton()
+    private let moreButton = NSButton()
+    private var snapshot: WorkspacePopoverSnapshot?
+
+    var onNavigate: ((Int) -> Void)?
+    var onDismiss: (() -> Void)?
+    var onRename: (() -> Void)?
+    var onMoveWindow: (() -> Void)?
+    var onPinWindow: (() -> Void)?
+    var onUnpinAll: (() -> Void)?
+    var onSettings: (() -> Void)?
+    var onAbout: (() -> Void)?
+    var onQuit: (() -> Void)?
+
+    override func loadView() {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 590))
+        view = root
+
+        let iconContainer = NSBox()
+        iconContainer.boxType = .custom
+        iconContainer.cornerRadius = 12
+        iconContainer.borderWidth = 1
+        iconContainer.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.15)
+        iconContainer.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.10)
+        let icon = NSImageView(image: NSImage(systemSymbolName: "display", accessibilityDescription: "Current desktop") ?? NSImage())
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 27, weight: .medium)
+        icon.contentTintColor = .controlAccentColor
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        iconContainer.contentView?.addSubview(icon)
+
+        currentTitle.font = .systemFont(ofSize: 17, weight: .semibold)
+        currentTitle.lineBreakMode = .byTruncatingTail
+        currentSubtitle.font = .systemFont(ofSize: 12)
+        currentSubtitle.textColor = .secondaryLabelColor
+        let titleStack = NSStackView(views: [currentTitle, currentSubtitle])
+        titleStack.orientation = .vertical
+        titleStack.alignment = .leading
+        titleStack.spacing = 3
+
+        moreButton.image = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "More actions")
+        moreButton.bezelStyle = .circular
+        moreButton.target = self
+        moreButton.action = #selector(showMoreMenu)
+        moreButton.toolTip = "More actions"
+
+        searchField.placeholderString = "Filter desktops"
+        searchField.delegate = self
+        searchField.sendsSearchStringImmediately = true
+
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = documentView
+        desktopStack.orientation = .vertical
+        desktopStack.alignment = .leading
+        desktopStack.distribution = .fill
+        desktopStack.spacing = 4
+        documentView.addSubview(desktopStack)
+
+        configureActionButton(renameButton, title: "Rename", symbol: "pencil", action: #selector(rename))
+        configureActionButton(moveButton, title: "Move Window", symbol: "rectangle.on.rectangle", action: #selector(moveWindow))
+        configureActionButton(pinButton, title: "Pin Window", symbol: "pin", action: #selector(pinWindow))
+        let actionStack = NSStackView(views: [renameButton, moveButton, pinButton])
+        actionStack.orientation = .horizontal
+        actionStack.distribution = .fillEqually
+        actionStack.spacing = 10
+
+        statusDot.wantsLayer = true
+        statusDot.layer?.cornerRadius = 5
+        statusLabel.font = .systemFont(ofSize: 11)
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.lineBreakMode = .byTruncatingTail
+        settingsButton.title = "Settings…"
+        settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
+        settingsButton.imagePosition = .imageLeading
+        settingsButton.bezelStyle = .rounded
+        settingsButton.target = self
+        settingsButton.action = #selector(openSettings)
+        let footerStack = NSStackView(views: [statusDot, statusLabel, settingsButton])
+        footerStack.orientation = .horizontal
+        footerStack.alignment = .centerY
+        footerStack.spacing = 8
+
+        let upperSeparator = NSBox()
+        upperSeparator.boxType = .separator
+        let lowerSeparator = NSBox()
+        lowerSeparator.boxType = .separator
+
+        for child in [iconContainer, titleStack, moreButton, searchField, scrollView, upperSeparator, actionStack, lowerSeparator, footerStack] {
+            child.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(child)
+        }
+
+        NSLayoutConstraint.activate([
+            iconContainer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
+            iconContainer.topAnchor.constraint(equalTo: root.topAnchor, constant: 18),
+            iconContainer.widthAnchor.constraint(equalToConstant: 56),
+            iconContainer.heightAnchor.constraint(equalToConstant: 56),
+            icon.centerXAnchor.constraint(equalTo: iconContainer.contentView!.centerXAnchor),
+            icon.centerYAnchor.constraint(equalTo: iconContainer.contentView!.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 34),
+            icon.heightAnchor.constraint(equalToConstant: 34),
+
+            titleStack.leadingAnchor.constraint(equalTo: iconContainer.trailingAnchor, constant: 14),
+            titleStack.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+            titleStack.trailingAnchor.constraint(lessThanOrEqualTo: moreButton.leadingAnchor, constant: -10),
+            moreButton.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
+            moreButton.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+            moreButton.widthAnchor.constraint(equalToConstant: 34),
+            moreButton.heightAnchor.constraint(equalToConstant: 34),
+
+            searchField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
+            searchField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
+            searchField.topAnchor.constraint(equalTo: iconContainer.bottomAnchor, constant: 16),
+            searchField.heightAnchor.constraint(equalToConstant: 34),
+
+            scrollView.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: searchField.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 10),
+            scrollView.heightAnchor.constraint(equalToConstant: 286),
+
+            upperSeparator.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
+            upperSeparator.trailingAnchor.constraint(equalTo: searchField.trailingAnchor),
+            upperSeparator.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 9),
+
+            actionStack.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
+            actionStack.trailingAnchor.constraint(equalTo: searchField.trailingAnchor),
+            actionStack.topAnchor.constraint(equalTo: upperSeparator.bottomAnchor, constant: 12),
+            actionStack.heightAnchor.constraint(equalToConstant: 72),
+
+            lowerSeparator.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
+            lowerSeparator.trailingAnchor.constraint(equalTo: searchField.trailingAnchor),
+            lowerSeparator.topAnchor.constraint(equalTo: actionStack.bottomAnchor, constant: 12),
+
+            footerStack.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
+            footerStack.trailingAnchor.constraint(equalTo: searchField.trailingAnchor),
+            footerStack.topAnchor.constraint(equalTo: lowerSeparator.bottomAnchor, constant: 10),
+            footerStack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
+            statusDot.widthAnchor.constraint(equalToConstant: 10),
+            statusDot.heightAnchor.constraint(equalToConstant: 10),
+            settingsButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 104),
+        ])
+    }
+
+    func update(with snapshot: WorkspacePopoverSnapshot) {
+        self.snapshot = snapshot
+        currentTitle.stringValue = snapshot.currentTitle
+        currentSubtitle.stringValue = snapshot.currentSubtitle
+        moveButton.isEnabled = snapshot.moveWindowEnabled
+        moveButton.toolTip = snapshot.moveWindowEnabled ? "Choose a desktop for the focused window" : "Enable window moving in Settings"
+        pinButton.isEnabled = snapshot.pinWindowEnabled
+        pinButton.title = snapshot.currentWindowPinned ? "Unpin Window" : "Pin Window"
+        pinButton.image = NSImage(systemSymbolName: snapshot.currentWindowPinned ? "pin.slash" : "pin", accessibilityDescription: nil)
+        pinButton.toolTip = snapshot.pinWindowEnabled ? "Keep the focused window above others" : "Enable window pinning in Settings"
+
+        let enabledFeatures: [String] = [
+            snapshot.overlayEnabled ? "Overlay" : nil,
+            snapshot.inputSourceEnabled ? "input source indicator" : nil,
+        ].compactMap { $0 }
+        if enabledFeatures.isEmpty {
+            statusDot.layer?.backgroundColor = NSColor.tertiaryLabelColor.cgColor
+            statusLabel.stringValue = "Visual indicators are off"
+        } else {
+            statusDot.layer?.backgroundColor = NSColor.systemGreen.cgColor
+            statusLabel.stringValue = enabledFeatures.joined(separator: " and ") + (enabledFeatures.count == 1 ? " is on" : " are on")
+        }
+        rebuildDesktopRows()
+    }
+
+    func handleKeyEvent(_ event: NSEvent) -> Bool {
+        if event.keyCode == 53 {
+            onDismiss?()
+            return true
+        }
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        guard modifiers == .command, let key = event.charactersIgnoringModifiers?.lowercased() else { return false }
+        if let number = Int(key), (1...9).contains(number),
+           let space = snapshot?.displays.flatMap(\.spaces).first(where: { $0.shortcut == "⌘\(number)" }) {
+            onNavigate?(space.globalPosition)
+            return true
+        }
+        switch key {
+        case "n": onRename?(); return true
+        case ",": onSettings?(); return true
+        case "q": onQuit?(); return true
+        default: return false
+        }
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        rebuildDesktopRows()
+    }
+
+    private func rebuildDesktopRows() {
+        for child in desktopStack.arrangedSubviews {
+            desktopStack.removeArrangedSubview(child)
+            child.removeFromSuperview()
+        }
+        guard let snapshot else { return }
+        let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var contentHeight: CGFloat = 0
+        var resultCount = 0
+
+        for display in snapshot.displays {
+            let matches = display.spaces.filter { space in
+                query.isEmpty
+                    || space.name.lowercased().contains(query)
+                    || "desktop \(space.localPosition)".contains(query)
+            }
+            guard !matches.isEmpty else { continue }
+
+            let displayLabel = NSTextField(labelWithString: display.name.uppercased())
+            displayLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+            displayLabel.textColor = .secondaryLabelColor
+            displayLabel.setContentHuggingPriority(.required, for: .vertical)
+            displayLabel.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            displayLabel.widthAnchor.constraint(equalTo: desktopStack.widthAnchor).isActive = true
+            desktopStack.addArrangedSubview(displayLabel)
+            contentHeight += 28
+
+            for item in matches {
+                let row = WorkspacePopoverRowView(item: item)
+                row.action = { [weak self] in self?.onNavigate?(item.globalPosition) }
+                row.widthAnchor.constraint(equalTo: desktopStack.widthAnchor).isActive = true
+                desktopStack.addArrangedSubview(row)
+                contentHeight += 48
+                resultCount += 1
+            }
+        }
+
+        if resultCount == 0 {
+            let empty = NSTextField(wrappingLabelWithString: "No desktops match “\(searchField.stringValue)”.")
+            empty.alignment = .center
+            empty.textColor = .secondaryLabelColor
+            empty.heightAnchor.constraint(equalToConstant: 70).isActive = true
+            empty.widthAnchor.constraint(equalTo: desktopStack.widthAnchor).isActive = true
+            desktopStack.addArrangedSubview(empty)
+            contentHeight = 70
+        }
+
+        let width = max(scrollView.contentSize.width, 330)
+        let height = max(contentHeight, scrollView.contentSize.height)
+        documentView.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        desktopStack.frame = documentView.bounds.insetBy(dx: 0, dy: 2)
+        desktopStack.autoresizingMask = [.width, .height]
+    }
+
+    private func configureActionButton(_ button: NSButton, title: String, symbol: String, action: Selector) {
+        button.title = title
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        button.imagePosition = .imageAbove
+        button.imageScaling = .scaleProportionallyDown
+        button.font = .systemFont(ofSize: 12)
+        button.bezelStyle = .rounded
+        button.target = self
+        button.action = action
+    }
+
+    @objc private func rename() { onRename?() }
+    @objc private func moveWindow() { onMoveWindow?() }
+    @objc private func pinWindow() { onPinWindow?() }
+    @objc private func openSettings() { onSettings?() }
+
+    @objc private func showMoreMenu() {
+        let menu = NSMenu()
+        if let count = snapshot?.pinnedWindowCount, count > 0 {
+            let unpin = NSMenuItem(title: "Unpin All Windows (\(count))", action: #selector(unpinAll), keyEquivalent: "")
+            unpin.target = self
+            unpin.image = NSImage(systemSymbolName: "pin.slash", accessibilityDescription: nil)
+            menu.addItem(unpin)
+            menu.addItem(.separator())
+        }
+        let about = NSMenuItem(title: "About Jumpee", action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
+        about.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil)
+        menu.addItem(about)
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: "Quit Jumpee", action: #selector(quit), keyEquivalent: "q")
+        quit.target = self
+        quit.image = NSImage(systemSymbolName: "power", accessibilityDescription: nil)
+        menu.addItem(quit)
+        menu.popUp(positioning: nil, at: NSPoint(x: moreButton.bounds.minX, y: moreButton.bounds.minY - 4), in: moreButton)
+    }
+
+    @objc private func unpinAll() { onUnpinAll?() }
+    @objc private func showAbout() { onAbout?() }
+    @objc private func quit() { onQuit?() }
+}
+
+final class WorkspacePopoverController: NSObject, NSPopoverDelegate {
+    private let popover = NSPopover()
+    private let contentController = WorkspacePopoverContentViewController()
+    private let snapshotProvider: () -> WorkspacePopoverSnapshot
+    private var cursorAnchorWindow: NSWindow?
+    private var previousApplication: NSRunningApplication?
+    private var restorePreviousApplication = true
+    private var keyMonitor: Any?
+
+    init(
+        snapshotProvider: @escaping () -> WorkspacePopoverSnapshot,
+        navigateHandler: @escaping (Int) -> Void,
+        renameHandler: @escaping () -> Void,
+        moveWindowHandler: @escaping () -> Void,
+        pinWindowHandler: @escaping () -> Void,
+        unpinAllHandler: @escaping () -> Void,
+        settingsHandler: @escaping () -> Void,
+        aboutHandler: @escaping () -> Void,
+        quitHandler: @escaping () -> Void
+    ) {
+        self.snapshotProvider = snapshotProvider
+        super.init()
+        popover.behavior = .transient
+        popover.animates = true
+        popover.contentSize = NSSize(width: 380, height: 590)
+        popover.contentViewController = contentController
+        popover.delegate = self
+
+        contentController.onNavigate = { [weak self] globalPosition in
+            self?.close(restoreFocus: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { navigateHandler(globalPosition) }
+        }
+        contentController.onDismiss = { [weak self] in
+            self?.close(restoreFocus: true)
+        }
+        contentController.onRename = { [weak self] in
+            self?.close(restoreFocus: false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { renameHandler() }
+        }
+        contentController.onMoveWindow = { [weak self] in
+            self?.close(restoreFocus: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { moveWindowHandler() }
+        }
+        contentController.onPinWindow = { [weak self] in
+            self?.close(restoreFocus: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { pinWindowHandler() }
+        }
+        contentController.onUnpinAll = { [weak self] in
+            unpinAllHandler()
+            self?.refresh()
+        }
+        contentController.onSettings = { [weak self] in
+            self?.close(restoreFocus: false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { settingsHandler() }
+        }
+        contentController.onAbout = { [weak self] in
+            self?.close(restoreFocus: false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { aboutHandler() }
+        }
+        contentController.onQuit = { [weak self] in
+            self?.close(restoreFocus: false)
+            quitHandler()
+        }
+    }
+
+    var isShown: Bool { popover.isShown }
+
+    func toggle(from statusButton: NSStatusBarButton?, atCursor: Bool) {
+        if popover.isShown {
+            close(restoreFocus: true)
+            return
+        }
+        show(from: statusButton, atCursor: atCursor)
+    }
+
+    func refresh() {
+        contentController.update(with: snapshotProvider())
+    }
+
+    func close(restoreFocus: Bool) {
+        restorePreviousApplication = restoreFocus
+        popover.performClose(nil)
+    }
+
+    private func show(from statusButton: NSStatusBarButton?, atCursor: Bool) {
+        previousApplication = NSWorkspace.shared.frontmostApplication
+        restorePreviousApplication = true
+        refresh()
+        NSApp.activate(ignoringOtherApps: true)
+
+        if atCursor || statusButton == nil {
+            let point = NSEvent.mouseLocation
+            let panel = NSPanel(
+                contentRect: NSRect(x: point.x, y: point.y, width: 2, height: 2),
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            panel.backgroundColor = .clear
+            panel.isOpaque = false
+            panel.hasShadow = false
+            panel.ignoresMouseEvents = true
+            panel.level = .popUpMenu
+            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            panel.orderFront(nil)
+            cursorAnchorWindow = panel
+            if let anchorView = panel.contentView {
+                popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .maxY)
+            }
+        } else if let statusButton {
+            popover.show(relativeTo: statusButton.bounds, of: statusButton, preferredEdge: .minY)
+        }
+
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            return self.contentController.handleKeyEvent(event) ? nil : event
+        }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+        cursorAnchorWindow?.orderOut(nil)
+        cursorAnchorWindow = nil
+        if restorePreviousApplication,
+           let previousApplication,
+           previousApplication.bundleIdentifier != Bundle.main.bundleIdentifier {
+            previousApplication.activate()
+        }
+        previousApplication = nil
+        restorePreviousApplication = true
+    }
+}

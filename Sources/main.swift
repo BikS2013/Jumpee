@@ -1573,6 +1573,7 @@ class MenuBarController: NSObject {
     private var hotkeyManager: GlobalHotkeyManager?
     private var inputSourceManager: InputSourceIndicatorManager?
     private var settingsWindowController: JumpeeSettingsWindowController?
+    private var workspacePopoverController: WorkspacePopoverController?
     private var isMenuOpen: Bool = false
     private var menuClosedAt: Date = .distantPast
 
@@ -1583,7 +1584,7 @@ class MenuBarController: NSObject {
         overlayManager = OverlayManager(spaceDetector: spaceDetector)
         super.init()
         migratePositionBasedConfig()
-        setupMenu()
+        setupWorkspacePopover()
         statusItem.button?.image = NSImage(systemSymbolName: "display", accessibilityDescription: "Jumpee")
         statusItem.button?.imagePosition = .imageLeading
         updateTitle()
@@ -1605,33 +1606,95 @@ class MenuBarController: NSObject {
     }
 
     func openMenu() {
-        if isMenuOpen { return }
-        if Date().timeIntervalSince(menuClosedAt) < 0.5 { return }
-
-        // When dropdownAtCursor is on — or when the bar icon is hidden, since
-        // performClick on an invisible status item is a no-op — pop the menu
-        // where the user is looking. Otherwise keep the original menu-bar
-        // behavior via performClick on the visible status item button.
         let needsCursorPopup = config.effectiveDropdownAtCursor || !config.effectiveMenuBarVisible
-        if needsCursorPopup, let menu = statusItem.menu {
-            // Same focus issue as Move Window: the global hotkey fires while
-            // another app is frontmost, so popUp is queued until Jumpee
-            // becomes active. Activate first, then restore focus afterward.
-            let previousApp = NSWorkspace.shared.frontmostApplication
-            NSApp.activate(ignoringOtherApps: true)
+        workspacePopoverController?.toggle(from: statusItem.button, atCursor: needsCursorPopup)
+    }
 
-            // Detach the menu from the status item for the duration of popUp;
-            // otherwise AppKit can route the click back through the menu bar.
-            statusItem.menu = nil
-            menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
-            statusItem.menu = menu
+    @objc private func statusItemClicked() {
+        workspacePopoverController?.toggle(from: statusItem.button, atCursor: false)
+    }
 
-            if let previousApp, previousApp.bundleIdentifier != Bundle.main.bundleIdentifier {
-                previousApp.activate()
+    private func setupWorkspacePopover() {
+        statusItem.menu = nil
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusItemClicked)
+
+        workspacePopoverController = WorkspacePopoverController(
+            snapshotProvider: { [weak self] in
+                self?.makeWorkspacePopoverSnapshot() ?? WorkspacePopoverSnapshot(
+                    currentTitle: "Jumpee",
+                    currentSubtitle: "No active desktop",
+                    displays: [],
+                    overlayEnabled: false,
+                    inputSourceEnabled: false,
+                    moveWindowEnabled: false,
+                    pinWindowEnabled: false,
+                    currentWindowPinned: false,
+                    pinnedWindowCount: 0
+                )
+            },
+            navigateHandler: { [weak self] globalPosition in
+                self?.navigateToSpace(globalPosition: globalPosition)
+            },
+            renameHandler: { [weak self] in self?.renameActiveSpace() },
+            moveWindowHandler: { [weak self] in self?.openMoveWindowMenu() },
+            pinWindowHandler: { [weak self] in self?.togglePinWindow() },
+            unpinAllHandler: {
+                WindowPinner.unpinAll()
+            },
+            settingsHandler: { [weak self] in self?.showSettings() },
+            aboutHandler: { [weak self] in self?.showAboutDialog() },
+            quitHandler: { [weak self] in self?.performQuit() }
+        )
+    }
+
+    private func makeWorkspacePopoverSnapshot() -> WorkspacePopoverSnapshot {
+        let currentSpaceID = spaceDetector.getCurrentSpaceID()
+        let currentInfo = spaceDetector.getCurrentSpaceInfo()
+        let activeDisplayID = spaceDetector.getActiveDisplayID()
+        let displays = spaceDetector.getSpacesByDisplay().map { display in
+            let displayName = spaceDetector.displayIDToScreen(display.displayID)?.localizedName ?? "Display"
+            let spaces = display.spaces.map { space in
+                let customName = config.spaces[String(space.spaceID)]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let name = customName?.isEmpty == false ? customName! : "Desktop \(space.localPosition)"
+                let shortcut = display.displayID == activeDisplayID && space.localPosition <= 9
+                    ? "⌘\(space.localPosition)"
+                    : nil
+                return WorkspacePopoverSpaceItem(
+                    spaceID: space.spaceID,
+                    localPosition: space.localPosition,
+                    globalPosition: space.globalPosition,
+                    name: name,
+                    shortcut: shortcut,
+                    isCurrent: space.spaceID == currentSpaceID
+                )
             }
-        } else {
-            statusItem.button?.performClick(nil)
+            return WorkspacePopoverDisplaySection(name: displayName, spaces: spaces)
         }
+
+        let currentNumber = currentInfo?.localPosition ?? 0
+        let currentName = currentInfo.flatMap {
+            config.spaces[String($0.spaceID)]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let currentTitle = currentName?.isEmpty == false ? currentName! : (currentNumber > 0 ? "Desktop \(currentNumber)" : "Jumpee")
+        let currentDisplayName = currentInfo.flatMap {
+            spaceDetector.displayIDToScreen($0.displayID)?.localizedName
+        } ?? "Current Display"
+        let currentSubtitle = currentNumber > 0
+            ? "Desktop \(currentNumber) · \(currentDisplayName)"
+            : "No active desktop"
+
+        return WorkspacePopoverSnapshot(
+            currentTitle: currentTitle,
+            currentSubtitle: currentSubtitle,
+            displays: displays,
+            overlayEnabled: config.overlay.enabled,
+            inputSourceEnabled: config.inputSourceIndicator?.enabled == true,
+            moveWindowEnabled: config.moveWindow?.enabled == true,
+            pinWindowEnabled: config.pinWindow?.enabled == true,
+            currentWindowPinned: WindowPinner.isFocusedWindowPinned(),
+            pinnedWindowCount: WindowPinner.pinnedCount
+        )
     }
 
     func openMoveWindowMenu() {
@@ -2011,12 +2074,23 @@ class MenuBarController: NSObject {
         updateTitle()
         overlayManager.updateOverlay(config: config)
         inputSourceManager?.refresh()
+        workspacePopoverController?.refresh()
     }
 
     @objc private func screenParametersDidChange(_ notification: Notification) {
         updateTitle()
         overlayManager.updateOverlay(config: config)
         inputSourceManager?.refresh()
+        workspacePopoverController?.refresh()
+    }
+
+    private func navigateToSpace(globalPosition: Int) {
+        guard let currentInfo = spaceDetector.getCurrentSpaceInfo() else { return }
+        if globalPosition != currentInfo.globalPosition {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                SpaceNavigator.navigateToSpace(index: globalPosition)
+            }
+        }
     }
 
     @objc private func navigateToSpace(_ sender: NSMenuItem) {
@@ -2154,6 +2228,7 @@ class MenuBarController: NSObject {
         overlayManager.updateOverlay(config: config)
         statusItem.isVisible = config.effectiveMenuBarVisible
         reRegisterHotkeys()
+        workspacePopoverController?.refresh()
 
         if config.inputSourceIndicator?.enabled == true {
             if inputSourceManager == nil {

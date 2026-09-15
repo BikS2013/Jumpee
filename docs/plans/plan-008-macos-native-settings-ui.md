@@ -3,6 +3,8 @@
 **Status:** Complete  
 **Date:** 2026-09-15
 
+> The focused ordinary-menu portion of this plan was superseded by the visual workspace popover in Plan 009. The Settings, shortcut, appearance, rename, and About work remains current.
+
 ## Objective
 
 Modernize Jumpee's interface to follow macOS utility conventions while preserving its existing desktop detection, navigation, overlays, window movement, pinning, hotkeys, and JSON configuration compatibility.

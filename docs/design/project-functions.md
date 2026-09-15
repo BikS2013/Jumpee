@@ -1,6 +1,6 @@
 # Jumpee - Functional Requirements
 
-**Last updated:** 2026-09-15 (macOS-native settings UI implemented)
+**Last updated:** 2026-09-15 (visual workspace popover implemented)
 
 ---
 
@@ -15,14 +15,14 @@ Users can assign custom names to each desktop/space via a rename dialog. Names a
 ### FR-3: Menu Bar Display
 The current space's custom name is displayed in the macOS menu bar. The format is configurable: with or without the space number prefix (e.g., "3: Browser" vs "Browser").
 
-### FR-4: Menu Bar Dropdown
-A dropdown menu lists all desktops with their custom names. Clicking a desktop navigates to it. The menu opens via clicking the menu bar item or via the global hotkey.
+### FR-4: Visual Workspace Popover
+A transient visual popover lists all desktops with their custom names, groups them by display, and supports filtering. Clicking a desktop row navigates to it. The popover opens by clicking the menu bar item or using the global hotkey.
 
 ### FR-5: Space Navigation
-Users can navigate to any desktop by clicking it in the dropdown menu or by pressing Cmd+1 through Cmd+9 while the menu is open. Navigation uses CGEvent synthesis to trigger the macOS Ctrl+N system shortcuts.
+Users can navigate to any desktop by clicking its popover row or by pressing Cmd+1 through Cmd+9 while the popover is open. Navigation uses CGEvent synthesis to trigger the macOS Ctrl+N system shortcuts.
 
 ### FR-6: Global Hotkey
-A configurable global hotkey (default: Cmd+J) opens the Jumpee dropdown from anywhere. The hotkey is registered via the Carbon `RegisterEventHotKey` API.
+A configurable global hotkey (default: Cmd+J) opens or closes the Jumpee popover from anywhere. The hotkey is registered via the Carbon `RegisterEventHotKey` API.
 
 ### FR-7: Desktop Overlay / Watermark
 A transparent text overlay displays the current space name on the desktop background. The overlay is fully configurable: opacity, font, font size, font weight, position (9 anchor points), text color, and margin.
@@ -31,23 +31,23 @@ A transparent text overlay displays the current space name on the desktop backgr
 All settings are stored in `~/.tool-agents/jumpee/config.json`. The Advanced Settings pane can reveal the file in Finder and reload it without restarting the app. Command+Comma opens the native Settings window rather than the raw file.
 
 ### FR-9: No Dock Icon
-Jumpee runs as an LSUIElement accessory app with no Dock icon. It has no persistent main window; the native Settings window and focused rename panel appear only when requested.
+Jumpee runs as an LSUIElement accessory app with no Dock icon. It has no persistent main window; the transient workspace popover, native Settings window, and focused rename panel appear only when requested.
 
 ---
 
 ## 2. Multi-Display Support (v1.1 - Implemented)
 
 ### FR-10: Per-Display Space Awareness
-On multi-display setups, Jumpee detects which display is active and shows only that display's spaces in the menu. Each display's spaces are numbered independently (per-display local positions).
+On multi-display setups, Jumpee detects the active display and groups spaces under their physical display names in the popover. Each display's spaces are numbered independently (per-display local positions); Command-number shortcuts are shown for the active display.
 
-### FR-11: Per-Display Menu Numbering
-Menu item keyboard shortcuts (Cmd+1-9) correspond to per-display local positions, not global positions. Navigation uses the global position internally (Ctrl+N system shortcut).
+### FR-11: Per-Display Popover Numbering
+Popover-row keyboard shortcuts (Cmd+1-9) correspond to per-display local positions on the active display, not global positions. Navigation uses the global position internally (Ctrl+N system shortcut).
 
 ### FR-12: Per-Display Overlay Positioning
 The overlay watermark appears on the active display's screen and repositions when the user switches to a different display.
 
 ### FR-13: Display Connect/Disconnect Handling
-Jumpee responds to display connection and disconnection events (`didChangeScreenParametersNotification`), updating the menu and overlay for the new display topology.
+Jumpee responds to display connection and disconnection events (`didChangeScreenParametersNotification`), updating the popover, menu-bar title, and overlay for the new display topology.
 
 ---
 
@@ -58,8 +58,8 @@ The user can move the currently focused (frontmost) application window from the 
 
 **Prerequisite:** The user must enable "Move window to Desktop N" shortcuts in System Settings > Keyboard > Keyboard Shortcuts > Mission Control.
 
-### FR-15: Menu-Based Window Move
-A "Move Window To..." submenu in the Jumpee dropdown lists all desktops on the active display (excluding the current desktop). Selecting an entry moves the focused window to that desktop. Keyboard equivalents (Shift+Cmd+1-9) are available when the menu is open.
+### FR-15: Popover-Based Window Move
+The popover's Move Window button opens a focused destination menu listing all other desktops on the active display. Selecting an entry moves the focused window to that desktop. The independent move-window global shortcut opens the same destination workflow directly at the pointer.
 
 ### FR-16: Move Shortcut Detection
 Jumpee detects whether the required "Move window to Desktop N" system shortcuts are enabled by reading the `com.apple.symbolichotkeys` preferences plist. If not enabled, a setup guidance dialog is shown.
@@ -98,8 +98,8 @@ Reloading the configuration from Advanced Settings re-registers all global hotke
 
 ## 5. Hotkey Configuration UI (Implemented; modernized 2026-09-15)
 
-### FR-25: Hotkey Menu Section
-The Shortcuts Settings pane displays all three configurable global shortcuts and the fixed menu-only shortcuts. Hotkey configuration is kept out of the daily-action menu.
+### FR-25: Shortcut Settings Section
+The Shortcuts Settings pane displays all three configurable global shortcuts and the fixed popover shortcuts. Hotkey configuration is kept out of the daily workspace popover.
 
 ### FR-26: Hotkey Editor Dialog
 Each configurable shortcut uses a recorder-style control. Clicking the control enters recording mode and captures the complete modifier-and-key chord directly, including supported named keys such as Space, Return, Tab, and Escape. Escape without modifiers cancels recording.
@@ -121,7 +121,7 @@ The move-window and pin-window recorder controls remain visible for discoverabil
 ## 6. About Panel (Implemented; modernized 2026-09-15)
 
 ### FR-31: About Menu Item
-An "About Jumpee" item appears with the other application-level commands near the bottom of the focused dropdown menu.
+An "About Jumpee" item appears with the application-level commands in the popover's compact overflow menu.
 
 ### FR-32: About Dialog Content
 Jumpee uses the standard macOS About panel with its runtime version and a concise description. Setup requirements and configuration-file actions live in Advanced Settings instead of overloading the About experience.
@@ -170,10 +170,10 @@ Multiple windows from different applications can be pinned simultaneously. All p
 Jumpee maintains an in-memory `Set<CGWindowID>` of currently pinned windows. This set is not persisted across app restarts -- all pins are released when Jumpee quits. The `WindowPinner` static class (following the same pattern as `WindowMover`) manages this state.
 
 ### FR-38: Pin Toggle Semantics
-The pin operation is a toggle: if the focused window is not pinned, the action pins it; if the focused window is already pinned, the action unpins it. This applies to both the global hotkey and the menu item.
+The pin operation is a toggle: if the focused window is not pinned, the action pins it; if the focused window is already pinned, the action unpins it. This applies to both the global hotkey and the popover action.
 
 ### FR-39: Graceful Handling of Closed Pinned Windows
-If a pinned window is closed by the user or its owning application, Jumpee silently removes it from the pinned set during the next cleanup pass. Cleanup is triggered before menu rebuild and on space change. No error dialog is shown.
+If a pinned window is closed by the user or its owning application, Jumpee silently removes it from the pinned set during the next cleanup pass. Cleanup is reflected the next time the popover snapshot is refreshed. No error dialog is shown.
 
 ### FR-40: Pin Window Configuration
 A `pinWindow` configuration section in `~/.tool-agents/jumpee/config.json` controls whether the feature is available:
@@ -184,19 +184,19 @@ A `pinWindow` configuration section in `~/.tool-agents/jumpee/config.json` contr
     }
 }
 ```
-When absent or `enabled: false`, the menu items and hotkey for pin-on-top are hidden/not registered. Existing configs without this key work without modification.
+When absent or `enabled: false`, the popover action remains visible but disabled with guidance, and the hotkey is not registered. Existing configs without this key work without modification.
 
 ### FR-41: Pin Window Global Hotkey
 A configurable global hotkey (default: Ctrl+Cmd+P) toggles pin state on the focused window. The hotkey is stored in `pinWindowHotkey` in the config, using the same `HotkeyConfig` schema as the existing `hotkey` and `moveWindowHotkey` fields. Registered as Carbon hotkey id=3 in the shared event handler.
 
 **Hotkey lifecycle:** Registered only when `pinWindow.enabled` is `true`. Re-registered on Settings changes or configuration reload. Unregistered when the feature is disabled.
 
-### FR-42: Pin/Unpin Menu Item
-A menu item in the Jumpee dropdown toggles the pin state of the focused window:
-- When the focused window is **not pinned**: displays "Pin Window on Top" with Ctrl+Cmd+P keyboard equivalent
-- When the focused window **is pinned**: displays "Unpin Window" with the same keyboard equivalent
-- Placed near the "Move Window To..." submenu (both are window-management operations)
-- Only visible when `pinWindow.enabled` is `true`
+### FR-42: Pin/Unpin Popover Action
+A large action button in the Jumpee popover toggles the pin state of the focused window:
+- When the focused window is **not pinned**: displays "Pin Window"
+- When the focused window **is pinned**: displays "Unpin Window"
+- Appears beside Rename and Move Window
+- Remains visible but disabled when `pinWindow.enabled` is not `true`
 
 ### FR-43: Pin Window Hotkey Editor
 The Shortcuts Settings pane includes the pin-window recorder alongside the dropdown and move-window recorders. It performs three-way conflict checking and is enabled only while the pin feature is enabled.
@@ -262,11 +262,11 @@ Monitoring the keyboard input source does not require Accessibility, Screen Reco
 
 ## 10. macOS-Native Interface (Implemented 2026-09-15)
 
-### FR-57: Focused Daily-Action Menu
-The status-item menu prioritizes desktop navigation, rename, move-window, and pin-window actions. Persistent settings, permission guidance, hotkey editors, raw configuration commands, and lengthy help content are excluded from the primary workflow.
+### FR-57: Visual Workspace Popover
+The status item and global open shortcut present a transient visual workspace popover instead of an ordinary application menu. The popover prioritizes desktop navigation, rename, move-window, and pin-window actions. Persistent settings, permission guidance, hotkey editors, raw configuration commands, and lengthy help content are excluded from the primary workflow.
 
 ### FR-58: Current Desktop Context
-The top of the menu displays the current desktop name as a bold header and a secondary line containing its local desktop number and display name. The status item uses the system display symbol beside its existing title.
+The popover header displays the current desktop name, its local desktop number, and display name beside a tinted system display symbol. The status item uses the system display symbol beside its existing title.
 
 ### FR-59: Native Settings Window
 Command+Comma and "Settings…" open a non-resizable, non-minimizable macOS Settings window with a stable, noncustomizable toolbar. The panes are General, Appearance, Shortcuts, and Advanced. The window title and size follow the selected pane.
@@ -285,3 +285,12 @@ Advanced Settings reports Accessibility, Mission Control shortcut, and Screen Re
 
 ### FR-64: Focused Rename Panel
 Renaming uses a compact native panel with a focused name field, Return-to-rename, Escape-to-cancel, a standard primary Rename button, and a visually separate Remove Name action.
+
+### FR-65: Searchable Display-Grouped Desktop List
+The popover groups desktop rows by physical display and filters them immediately by custom name or desktop number. Each row shows its local position, resolved name, available Command-number shortcut, and a checkmark for the current desktop. Selecting a row closes the popover and navigates to that desktop.
+
+### FR-66: Popover Actions and Status
+The popover presents large Rename, Move Window, and Pin/Unpin Window actions. Disabled features remain visible with explanatory tooltips. A footer summarizes the overlay and input-source-indicator state and opens Settings. A compact overflow menu contains About, Quit, and Unpin All when applicable.
+
+### FR-67: Contextual Popover Placement
+Clicking the visible status item anchors the popover beneath the menu bar item. Opening it through the global shortcut respects the existing dropdown-location preference: it anchors at the pointer when configured or at the status item otherwise. Closing or completing a transient action restores focus to the previously active application when appropriate.

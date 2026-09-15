@@ -100,13 +100,14 @@ Desktop switching requires **Ctrl+1** through **Ctrl+9** shortcuts:
 
 | Action | How |
 |--------|-----|
-| Open desktop list | **Cmd+J** (global hotkey) or click the menu bar item |
-| Jump to a desktop | **Cmd+1..9** while menu is open, or click it |
-| Rename current desktop | **Cmd+N** or click "Rename Current Desktop..." |
+| Open visual workspace popover | **Cmd+J** (global hotkey) or click the menu bar item |
+| Filter desktops | Type in the popover's search field |
+| Jump to a desktop | **Cmd+1..9** while the popover is open, or click its row |
+| Rename current desktop | **Cmd+N** or click **Rename** in the popover |
 | Open Settings | **Cmd+,** or click "Settings…" |
 | Configure menu, features, appearance, or hotkeys | Use the corresponding Settings pane |
 | Edit or reload the config file | Use **Settings > Advanced** |
-| Quit | **Cmd+Q** from menu |
+| Quit | **Cmd+Q** or use the popover's **…** menu |
 
 ## Configuration
 
