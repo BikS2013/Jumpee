@@ -90,10 +90,11 @@ Jumpee needs Accessibility permissions to switch desktops. On first launch, a sy
 2. Find **Jumpee** and toggle it **ON** (or click `+` to add it)
 
 ### 2. Mission Control Keyboard Shortcuts (required)
-Desktop switching requires **Ctrl+1** through **Ctrl+9** shortcuts:
+Desktop switching requires **Ctrl+1** through **Ctrl+9**, and moving windows requires **Ctrl+Left** / **Ctrl+Right**:
 
 1. Open **System Settings** > **Keyboard** > **Keyboard Shortcuts** > **Mission Control**
 2. Enable **"Switch to Desktop 1"** through **"Switch to Desktop 9"**
+3. Enable **"Move left a space"** and **"Move right a space"** (used by Move Window)
 
 ### 3. Launch at Login (optional)
 **System Settings** > **General** > **Login Items** > click `+` > select **Jumpee**

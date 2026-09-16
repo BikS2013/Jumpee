@@ -150,6 +150,7 @@ private final class WorkspacePopoverRowView: NSView {
 private final class WorkspacePopoverActionButton: NSView {
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
+    private let shortcutLabel = NSTextField(labelWithString: "")
     private let clickButton = NSButton()
     private var trackingAreaReference: NSTrackingArea?
     private var isHovered = false
@@ -166,7 +167,9 @@ private final class WorkspacePopoverActionButton: NSView {
         NSSize(width: 104, height: 72)
     }
 
-    init(title: String, symbol: String) {
+    /// - Parameter shortcut: Key combination that triggers the action while the popover
+    ///   is open (e.g. "⌘N"), shown under the title so it is discoverable.
+    init(title: String, symbol: String, shortcut: String) {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 9
@@ -177,6 +180,10 @@ private final class WorkspacePopoverActionButton: NSView {
         titleLabel.font = .systemFont(ofSize: 12, weight: .medium)
         titleLabel.alignment = .center
         titleLabel.lineBreakMode = .byTruncatingTail
+        shortcutLabel.stringValue = shortcut
+        shortcutLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        shortcutLabel.textColor = .secondaryLabelColor
+        shortcutLabel.alignment = .center
 
         clickButton.title = ""
         clickButton.isBordered = false
@@ -184,10 +191,11 @@ private final class WorkspacePopoverActionButton: NSView {
         clickButton.target = self
         clickButton.action = #selector(performAction)
 
-        let content = NSStackView(views: [iconView, titleLabel])
+        let content = NSStackView(views: [iconView, titleLabel, shortcutLabel])
         content.orientation = .vertical
         content.alignment = .centerX
-        content.spacing = 5
+        content.spacing = 3
+        content.setCustomSpacing(1, after: titleLabel)
 
         for child in [content, clickButton] {
             child.translatesAutoresizingMaskIntoConstraints = false
@@ -237,7 +245,7 @@ private final class WorkspacePopoverActionButton: NSView {
     func configure(title: String, symbol: String) {
         titleLabel.stringValue = title
         iconView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        clickButton.setAccessibilityLabel(title)
+        clickButton.setAccessibilityLabel("\(title), \(shortcutLabel.stringValue)")
     }
 
     private func updateAppearance() {
@@ -263,9 +271,9 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
     private let scrollView = NSScrollView()
     private let documentView = WorkspacePopoverFlippedView()
     private let desktopStack = NSStackView()
-    private let renameButton = WorkspacePopoverActionButton(title: "Rename", symbol: "pencil")
-    private let moveButton = WorkspacePopoverActionButton(title: "Move Window", symbol: "rectangle.on.rectangle")
-    private let pinButton = WorkspacePopoverActionButton(title: "Pin Window", symbol: "pin")
+    private let renameButton = WorkspacePopoverActionButton(title: "Rename", symbol: "pencil", shortcut: "⌘N")
+    private let moveButton = WorkspacePopoverActionButton(title: "Move Window", symbol: "rectangle.on.rectangle", shortcut: "⌘M")
+    private let pinButton = WorkspacePopoverActionButton(title: "Pin Window", symbol: "pin", shortcut: "⌘P")
     private let statusDot = NSView()
     private let statusLabel = NSTextField(labelWithString: "")
     private let settingsButton = NSButton()
@@ -341,7 +349,14 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.lineBreakMode = .byTruncatingTail
-        settingsButton.title = "Settings…"
+        settingsButton.title = "Settings…  ⌘,"
+        let settingsTitle = NSMutableAttributedString(string: "Settings…  ⌘,")
+        settingsTitle.addAttributes(
+            [.foregroundColor: NSColor.secondaryLabelColor, .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)],
+            range: NSRange(location: settingsTitle.length - 2, length: 2)
+        )
+        settingsButton.attributedTitle = settingsTitle
+        settingsButton.toolTip = "Open Settings (⌘,)"
         settingsButton.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
         settingsButton.imagePosition = .imageLeading
         settingsButton.bezelStyle = .rounded
@@ -454,6 +469,12 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
         }
         switch key {
         case "n": onRename?(); return true
+        case "m":
+            guard moveButton.isEnabled else { return true }
+            onMoveWindow?(); return true
+        case "p":
+            guard pinButton.isEnabled else { return true }
+            onPinWindow?(); return true
         case ",": onSettings?(); return true
         case "q": onQuit?(); return true
         default: return false
@@ -554,12 +575,15 @@ final class WorkspacePopoverController: NSObject, NSPopoverDelegate {
     private var previousApplication: NSRunningApplication?
     private var restorePreviousApplication = true
     private var keyMonitor: Any?
+    /// Work to run once the popover has fully closed (after its dismissal animation),
+    /// e.g. opening the Move Window destination menu.
+    private var afterCloseAction: (() -> Void)?
 
     init(
         snapshotProvider: @escaping () -> WorkspacePopoverSnapshot,
         navigateHandler: @escaping (Int) -> Void,
         renameHandler: @escaping () -> Void,
-        moveWindowHandler: @escaping () -> Void,
+        moveWindowHandler: @escaping (NSRunningApplication?) -> Void,
         pinWindowHandler: @escaping () -> Void,
         unpinAllHandler: @escaping () -> Void,
         settingsHandler: @escaping () -> Void,
@@ -586,8 +610,14 @@ final class WorkspacePopoverController: NSObject, NSPopoverDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { renameHandler() }
         }
         contentController.onMoveWindow = { [weak self] in
-            self?.close(restoreFocus: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { moveWindowHandler() }
+            // Capture the app the user was working in before the popover took focus.
+            // Do NOT restore focus to it here: the destination menu that follows is a
+            // pop-up NSMenu owned by Jumpee, and handing focus back to the other app
+            // while it is open dismisses it before the user can pick a desktop.
+            // openMoveWindowMenu restores focus to targetApp once the menu closes.
+            let targetApp = self?.previousApplication
+            self?.afterCloseAction = { moveWindowHandler(targetApp) }
+            self?.close(restoreFocus: false)
         }
         contentController.onPinWindow = { [weak self] in
             self?.close(restoreFocus: true)
@@ -679,5 +709,9 @@ final class WorkspacePopoverController: NSObject, NSPopoverDelegate {
         }
         previousApplication = nil
         restorePreviousApplication = true
+        if let afterCloseAction {
+            self.afterCloseAction = nil
+            DispatchQueue.main.async { afterCloseAction() }
+        }
     }
 }

@@ -690,10 +690,18 @@ final class ShortcutsSettingsViewController: NSViewController, JumpeeSettingsPan
         let desktopShortcuts = NSTextField(labelWithString: "⌘1 … ⌘9")
         desktopShortcuts.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         let renameShortcut = NSTextField(labelWithString: "⌘N")
-        renameShortcut.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        let moveShortcut = NSTextField(labelWithString: "⌘M")
+        let pinShortcut = NSTextField(labelWithString: "⌘P")
+        let settingsShortcut = NSTextField(labelWithString: "⌘,")
+        for label in [renameShortcut, moveShortcut, pinShortcut, settingsShortcut] {
+            label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        }
         let menuSection = JumpeeUI.section(title: "Menu Shortcuts", rows: [
             JumpeeUI.settingRow(title: "Switch to Desktop 1–9", control: desktopShortcuts),
             JumpeeUI.settingRow(title: "Rename Current Desktop", control: renameShortcut),
+            JumpeeUI.settingRow(title: "Move Current Window", control: moveShortcut),
+            JumpeeUI.settingRow(title: "Pin / Unpin Current Window", control: pinShortcut),
+            JumpeeUI.settingRow(title: "Open Settings", control: settingsShortcut),
         ])
         let note = NSTextField(wrappingLabelWithString: "Jumpee warns you if a shortcut conflicts with another Jumpee action. Press Escape while recording to cancel.")
         note.textColor = .secondaryLabelColor
@@ -913,7 +921,7 @@ final class AdvancedSettingsViewController: NSViewController, JumpeeSettingsPane
         guard isViewLoaded else { return }
         _ = configProvider()
         setStatus(accessibilityStatus, granted: AXIsProcessTrusted(), grantedText: "Granted", missingText: "Not granted")
-        setStatus(shortcutsStatus, granted: WindowMover.areSystemShortcutsEnabled(), grantedText: "Detected", missingText: "Not detected")
+        setStatus(shortcutsStatus, granted: SpaceNavigator.areSystemShortcutsEnabled() && WindowMover.areSystemShortcutsEnabled(), grantedText: "Detected", missingText: "Not detected")
         setStatus(recordingStatus, granted: CGPreflightScreenCaptureAccess(), grantedText: "Granted", missingText: "Not granted")
     }
 

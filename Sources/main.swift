@@ -904,6 +904,12 @@ class SpaceNavigator {
         }
     }
 
+    /// Check whether "Switch to Desktop 1" (Ctrl+1), the first of the shortcuts
+    /// navigation synthesizes, is enabled. Symbolic hotkey 118 = "Switch to Desktop 1".
+    static func areSystemShortcutsEnabled() -> Bool {
+        return CGSIsSymbolicHotKeyEnabled(118)
+    }
+
     static func checkAccessibility() {
         let trusted = AXIsProcessTrusted()
         if !trusted {
@@ -928,55 +934,122 @@ class SpaceNavigator {
     }
 }
 
+// MARK: - Focused Window Resolver
+
+/// Resolves the focused application and its focused window through the Accessibility API.
+///
+/// Both the Move Window and Pin Window features need "the window the user is working in".
+/// The classic route — `kAXFocusedApplicationAttribute` on the system-wide element — fails
+/// with `kAXErrorCannotComplete` (-25204) on macOS 27 even for a trusted process, which made
+/// both features silently do nothing. Asking the application element built from the
+/// frontmost process id still works, so that is the route used when the system-wide
+/// query fails (or when the caller already knows which app owns the target window).
+class FocusedWindowResolver {
+
+    /// - Parameter app: The application that owned the focused window when the user
+    ///   triggered the action. Pass it when Jumpee itself may have become active since
+    ///   (e.g. after showing a popover or a pop-up menu). When nil, the system-wide focus
+    ///   is tried first and the frontmost application second.
+    static func focusedAppAndWindow(preferring app: NSRunningApplication? = nil) -> (AXUIElement, AXUIElement)? {
+        var candidates: [(String, AXUIElement)] = []
+
+        if let app, app.bundleIdentifier != Bundle.main.bundleIdentifier {
+            candidates.append(("target app '\(app.localizedName ?? "?")' (pid \(app.processIdentifier))",
+                               AXUIElementCreateApplication(app.processIdentifier)))
+        }
+
+        let systemWide = AXUIElementCreateSystemWide()
+        var systemFocusedApp: CFTypeRef?
+        let systemResult = AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &systemFocusedApp)
+        if systemResult == .success, let element = systemFocusedApp {
+            candidates.append(("system-wide focused application", element as! AXUIElement))
+        } else {
+            NSLog("[Jumpee:Focus] System-wide focused application unavailable (AXError \(systemResult.rawValue)); using frontmost application")
+        }
+
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.bundleIdentifier != Bundle.main.bundleIdentifier {
+            candidates.append(("frontmost app '\(frontmost.localizedName ?? "?")' (pid \(frontmost.processIdentifier))",
+                               AXUIElementCreateApplication(frontmost.processIdentifier)))
+        }
+
+        for (label, appElement) in candidates {
+            var focusedWindow: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &focusedWindow)
+            if result == .success, let window = focusedWindow {
+                return (appElement, window as! AXUIElement)
+            }
+            NSLog("[Jumpee:Focus] No focused window via \(label) (AXError \(result.rawValue))")
+        }
+
+        NSLog("[Jumpee:Focus] Could not resolve a focused window (AXIsProcessTrusted=\(AXIsProcessTrusted()))")
+        return nil
+    }
+}
+
 // MARK: - Window Mover
 
 class WindowMover {
 
-    /// Move the focused window to the given desktop using mouse-drag simulation.
+    /// Symbolic hotkey IDs of the Mission Control "Move left a space" / "Move right a space"
+    /// shortcuts (Ctrl+Left / Ctrl+Right by default).
+    static let moveLeftHotKey: CGSSymbolicHotKey = 79
+    static let moveRightHotKey: CGSSymbolicHotKey = 81
+
+    /// Delay between two consecutive arrow presses while the window is held. The space
+    /// switch animation must have started before the next press is honoured.
+    static let stepInterval: TimeInterval = 0.45
+
+    /// Move the focused window `steps` desktops to the right (positive) or left (negative)
+    /// on its display, using mouse-drag simulation.
     ///
     /// This replicates the Amethyst 0.22.0+ approach for macOS 15 (Sequoia):
     /// 1. Find the focused window's title bar position via Accessibility API
     /// 2. Simulate mouse-down + drag on the title bar
-    /// 3. Fire the "Switch to Desktop N" system hotkey while dragging
+    /// 3. Fire the "Move left/right a space" system hotkey `|steps|` times while dragging
     /// 4. Release the mouse — the window lands on the new space
     ///
-    /// Requires "Switch to Desktop N" shortcuts to be enabled in System Settings
-    /// (the same shortcuts Jumpee already uses for space navigation).
+    /// Ctrl+Left/Right is used instead of "Switch to Desktop N" (Ctrl+N) because on
+    /// macOS 27 synthesized Ctrl+N presses are ignored by the system hotkey layer while
+    /// synthesized Ctrl+arrow presses are honoured (verified with
+    /// `test_scripts/test-window-move-live.swift`). Requires the Mission Control
+    /// "Move left/right a space" shortcuts to be enabled in System Settings.
     ///
-    /// - Parameter index: 1-based global desktop position (1 through 16).
-    static func moveToSpace(index: Int) {
-        guard index >= 1 && index <= 16 else { return }
+    /// - Parameters:
+    ///   - steps: Signed number of desktops to move on the current display; 0 is a no-op.
+    ///   - targetApp: The application that owned the focused window when the user asked
+    ///     for the move (see `FocusedWindowResolver`). Nil means "whatever is frontmost".
+    static func moveWindow(byDesktops steps: Int, targetApp: NSRunningApplication? = nil) {
+        guard steps != 0 else {
+            NSLog("[Jumpee:Move] Target desktop is the current one; nothing to do")
+            return
+        }
 
-        // 1. Get the "Switch to Desktop N" hotkey from the OS
-        //    Symbolic hotkey IDs: Desktop 1 = 118, Desktop 2 = 119, ..., Desktop N = 117 + N
-        let symbolicHotKey: CGSSymbolicHotKey = UInt32(117 + index)
+        // 1. Get the "Move left/right a space" hotkey from the OS
+        let symbolicHotKey = steps > 0 ? moveRightHotKey : moveLeftHotKey
         var keyCode: CGKeyCode = 0
         var modifierFlags: CGEventFlags = []
 
         let error = CGSGetSymbolicHotKeyValue(symbolicHotKey, nil, &keyCode, &modifierFlags)
-        guard error == 0 else { return }
+        guard error == 0 else {
+            NSLog("[Jumpee:Move] CGSGetSymbolicHotKeyValue(\(symbolicHotKey)) failed with \(error)")
+            return
+        }
+
+        // 2. Get the focused window via Accessibility API
+        guard let (_, window) = FocusedWindowResolver.focusedAppAndWindow(preferring: targetApp) else {
+            NSLog("[Jumpee:Move] Aborted: no focused window to move")
+            return
+        }
 
         // Temporarily enable the hotkey if it's disabled
         let wasEnabled = CGSIsSymbolicHotKeyEnabled(symbolicHotKey)
         if !wasEnabled {
             _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, true)
         }
-
-        // 2. Get the focused window via Accessibility API
-        let systemWide = AXUIElementCreateSystemWide()
-        var focusedApp: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedApp) == .success else {
+        func restoreHotKey() {
             if !wasEnabled { _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, false) }
-            return
         }
-
-        var focusedWindow: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(focusedApp as! AXUIElement, kAXFocusedWindowAttribute as CFString, &focusedWindow) == .success else {
-            if !wasEnabled { _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, false) }
-            return
-        }
-
-        let window = focusedWindow as! AXUIElement
 
         // 3. Find cursor position in the title bar
         var cursorPosition: CGPoint
@@ -1018,46 +1091,53 @@ class WindowMover {
                                        mouseCursorPosition: cursorPosition, mouseButton: .left),
               let upEvent   = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
                                        mouseCursorPosition: cursorPosition, mouseButton: .left) else {
-            if !wasEnabled { _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, false) }
+            NSLog("[Jumpee:Move] Could not create mouse events for the drag simulation")
+            restoreHotKey()
             return
         }
         moveEvent.flags = []
         downEvent.flags = []
         upEvent.flags = []
+        NSLog("[Jumpee:Move] Dragging window at \(cursorPosition) \(abs(steps)) desktop(s) \(steps > 0 ? "right" : "left") (keyCode \(keyCode), flags 0x\(String(modifierFlags.rawValue, radix: 16)))")
 
         // 5. Grab the window's title bar
         moveEvent.post(tap: .cghidEventTap)
         downEvent.post(tap: .cghidEventTap)
         dragEvent.post(tap: .cghidEventTap)
 
-        // 6. After 50ms: fire the space-switch hotkey while window is grabbed
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            if let keyDown = CGEvent(keyboardEventSource: nil,
-                                     virtualKey: keyCode, keyDown: true) {
+        // 6. Fire the space-switch hotkey once per desktop while the window is held,
+        //    then release the mouse 400ms after the last press.
+        func pressArrow(remaining: Int) {
+            guard remaining > 0 else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
+                    upEvent.post(tap: .cghidEventTap)
+                    restoreHotKey()
+                    NSLog("[Jumpee:Move] Released window")
+                }
+                return
+            }
+            if let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) {
                 keyDown.flags = modifierFlags
                 keyDown.post(tap: .cghidEventTap)
             }
-            if let keyUp = CGEvent(keyboardEventSource: nil,
-                                    virtualKey: keyCode, keyDown: false) {
-                keyUp.flags = []
+            usleep(40_000)
+            if let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) {
+                keyUp.flags = modifierFlags
                 keyUp.post(tap: .cghidEventTap)
             }
-
-            // 7. After 400ms: release mouse — window lands on new space
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
-                upEvent.post(tap: .cghidEventTap)
-                if !wasEnabled {
-                    _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, false)
-                }
+            DispatchQueue.main.asyncAfter(deadline: .now() + stepInterval) {
+                pressArrow(remaining: remaining - 1)
             }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            pressArrow(remaining: abs(steps))
         }
     }
 
-    /// Check whether "Switch to Desktop 1" shortcut is enabled.
-    /// This is the same shortcut Jumpee already requires for navigation.
+    /// Check whether the Mission Control "Move left a space" / "Move right a space"
+    /// shortcuts the window mover relies on are enabled.
     static func areSystemShortcutsEnabled() -> Bool {
-        // Symbolic hotkey 118 = "Switch to Desktop 1"
-        return CGSIsSymbolicHotKeyEnabled(118)
+        return CGSIsSymbolicHotKeyEnabled(moveLeftHotKey) && CGSIsSymbolicHotKeyEnabled(moveRightHotKey)
     }
 }
 
@@ -1368,18 +1448,7 @@ class WindowPinner {
 
     /// Get the focused app's AXUIElement and its focused window AXUIElement.
     static func getFocusedAppAndWindow() -> (AXUIElement, AXUIElement)? {
-        let systemWide = AXUIElementCreateSystemWide()
-        var focusedApp: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedApp) == .success else {
-            return nil
-        }
-
-        var focusedWindow: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(focusedApp as! AXUIElement, kAXFocusedWindowAttribute as CFString, &focusedWindow) == .success else {
-            return nil
-        }
-
-        return (focusedApp as! AXUIElement, focusedWindow as! AXUIElement)
+        return FocusedWindowResolver.focusedAppAndWindow()
     }
 
     /// Get the CGWindowID of the currently focused window via Accessibility API.
@@ -1637,7 +1706,7 @@ class MenuBarController: NSObject {
                 self?.navigateToSpace(globalPosition: globalPosition)
             },
             renameHandler: { [weak self] in self?.renameActiveSpace() },
-            moveWindowHandler: { [weak self] in self?.openMoveWindowMenu() },
+            moveWindowHandler: { [weak self] targetApp in self?.openMoveWindowMenu(targetApp: targetApp) },
             pinWindowHandler: { [weak self] in self?.togglePinWindow() },
             unpinAllHandler: {
                 WindowPinner.unpinAll()
@@ -1697,8 +1766,22 @@ class MenuBarController: NSObject {
         )
     }
 
-    func openMoveWindowMenu() {
-        guard config.moveWindow?.enabled == true else { return }
+    /// Show the "move the focused window to desktop N" pop-up menu.
+    ///
+    /// - Parameter targetApp: The application that owned the focused window when the
+    ///   user triggered the action. The hotkey path leaves it nil (the frontmost app is
+    ///   still the user's app at that point); the workspace popover passes the app it
+    ///   recorded before it took focus, because by the time the popover has closed and
+    ///   this menu opens, Jumpee itself may still be the frontmost application.
+    func openMoveWindowMenu(targetApp: NSRunningApplication? = nil) {
+        // The popover hands us focus deliberately (see WorkspacePopoverController); if we
+        // bail out before showing the menu, give it back to the user's app ourselves.
+        func restoreFocus() {
+            if let targetApp, targetApp.bundleIdentifier != Bundle.main.bundleIdentifier {
+                targetApp.activate()
+            }
+        }
+        guard config.moveWindow?.enabled == true else { restoreFocus(); return }
 
         let menu = NSMenu()
         let displays = spaceDetector.getSpacesByDisplay()
@@ -1735,14 +1818,16 @@ class MenuBarController: NSObject {
             }
         }
 
-        guard menu.items.count > 0 else { return }
+        guard menu.items.count > 0 else { restoreFocus(); return }
 
         // The hotkey fires while another app is frontmost. NSMenu.popUp blocks
         // (and silently queues) until our process becomes active, which is why
         // pressing Cmd+M does nothing until the user clicks on a window — at
         // that point every queued menu surfaces in sequence. Activate first so
         // popUp runs immediately. ignoringOtherApps works for LSUIElement apps.
-        let previousApp = NSWorkspace.shared.frontmostApplication
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let previousApp = targetApp ?? frontmost
+        for item in menu.items { item.representedObject = previousApp }
         NSApp.activate(ignoringOtherApps: true)
 
         let mouseLocation = NSEvent.mouseLocation
@@ -1758,9 +1843,29 @@ class MenuBarController: NSObject {
 
     @objc private func moveWindowFromPopup(_ sender: NSMenuItem) {
         let targetGlobalPosition = sender.tag
+        let targetApp = sender.representedObject as? NSRunningApplication
+        guard let steps = desktopSteps(toGlobalPosition: targetGlobalPosition) else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            WindowMover.moveToSpace(index: targetGlobalPosition)
+            WindowMover.moveWindow(byDesktops: steps, targetApp: targetApp)
         }
+    }
+
+    /// Signed number of desktops between the current desktop and the desktop at
+    /// `globalPosition`, on the active display. Nil when the target is not on the active
+    /// display (the mover drags with Ctrl+Left/Right, which cannot cross displays).
+    private func desktopSteps(toGlobalPosition globalPosition: Int) -> Int? {
+        guard let current = spaceDetector.getCurrentSpaceInfo() else {
+            NSLog("[Jumpee:Move] No current space info")
+            return nil
+        }
+        let target = spaceDetector.getSpacesByDisplay()
+            .first { $0.displayID == current.displayID }?
+            .spaces.first { $0.globalPosition == globalPosition }
+        guard let target else {
+            NSLog("[Jumpee:Move] Desktop \(globalPosition) is not on the active display")
+            return nil
+        }
+        return target.localPosition - current.localPosition
     }
 
     private func migratePositionBasedConfig() {
@@ -2106,15 +2211,16 @@ class MenuBarController: NSObject {
 
     /// Handle "Move Window To > Desktop N" submenu selection.
     /// Closes the menu, waits for the previously-focused app to regain focus,
-    /// then synthesizes the Ctrl+Shift+N system shortcut.
+    /// then drags the window across with the Ctrl+Left/Right system shortcuts.
     @objc private func moveWindowToSpace(_ sender: NSMenuItem) {
         let targetGlobalPosition = sender.tag
         statusItem.menu?.cancelTracking()
+        guard let steps = desktopSteps(toGlobalPosition: targetGlobalPosition) else { return }
 
         // Wait 300ms for Jumpee's menu to close and the target app to regain focus.
         // This is the same delay used by navigateToSpace(_:) and is proven reliable.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            WindowMover.moveToSpace(index: targetGlobalPosition)
+            WindowMover.moveWindow(byDesktops: steps)
         }
     }
 

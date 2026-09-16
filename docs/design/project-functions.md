@@ -54,12 +54,12 @@ Jumpee responds to display connection and disconnection events (`didChangeScreen
 ## 3. Move Window to Desktop (v1.2 - Implemented)
 
 ### FR-14: Move Focused Window to Target Desktop
-The user can move the currently focused (frontmost) application window from the current desktop to a specified target desktop. The operation uses synthesized macOS system keyboard shortcuts (Ctrl+Shift+N).
+The user can move the currently focused (frontmost) application window from the current desktop to a specified target desktop on the same display. Jumpee grabs the window's title bar with a synthesized mouse drag and, while holding it, presses the Mission Control "Move left/right a space" shortcut (Ctrl+Left / Ctrl+Right) once per desktop between the current and the target desktop (v1.9.2). The desktop follows the window.
 
-**Prerequisite:** The user must enable "Move window to Desktop N" shortcuts in System Settings > Keyboard > Keyboard Shortcuts > Mission Control.
+**Prerequisite:** The user must enable the "Move left a space" and "Move right a space" shortcuts in System Settings > Keyboard > Keyboard Shortcuts > Mission Control.
 
 ### FR-15: Popover-Based Window Move
-The popover's Move Window button opens a focused destination menu listing all other desktops on the active display. Selecting an entry moves the focused window to that desktop. The independent move-window global shortcut opens the same destination workflow directly at the pointer.
+The popover's Move Window button opens a focused destination menu listing all other desktops on the active display. Selecting an entry moves the focused window to that desktop. The independent move-window global shortcut opens the same destination workflow directly at the pointer. The window that is moved is the focused window of the application the user was working in before the popover or menu took focus (v1.9.2), so the move still targets the right window when Jumpee itself is momentarily frontmost.
 
 ### FR-16: Move Shortcut Detection
 Jumpee detects whether the required "Move window to Desktop N" system shortcuts are enabled by reading the `com.apple.symbolichotkeys` preferences plist. If not enabled, a setup guidance dialog is shown.
@@ -99,7 +99,7 @@ Reloading the configuration from Advanced Settings re-registers all global hotke
 ## 5. Hotkey Configuration UI (Implemented; modernized 2026-09-15)
 
 ### FR-25: Shortcut Settings Section
-The Shortcuts Settings pane displays all three configurable global shortcuts and the fixed popover shortcuts. Hotkey configuration is kept out of the daily workspace popover.
+The Shortcuts Settings pane displays all three configurable global shortcuts and the fixed popover shortcuts (⌘1–9, ⌘N, ⌘M, ⌘P, ⌘,). Hotkey configuration is kept out of the daily workspace popover.
 
 ### FR-26: Hotkey Editor Dialog
 Each configurable shortcut uses a recorder-style control. Clicking the control enters recording mode and captures the complete modifier-and-key chord directly, including supported named keys such as Space, Return, Tab, and Escape. Escape without modifiers cancels recording.
@@ -140,7 +140,7 @@ Jumpee is a small native Swift app with no external dependencies. The build uses
 Jumpee requires Accessibility permissions for CGEvent synthesis (space navigation and window moving). The app prompts for this on first launch.
 
 ### NFR-3: System Shortcut Dependency
-Space navigation (Ctrl+N) and window moving (Ctrl+Shift+N) both require the user to enable the corresponding shortcuts in macOS System Settings. This is an inherent platform limitation.
+Space navigation (Ctrl+N) and window moving (Ctrl+Left / Ctrl+Right while dragging) both require the user to enable the corresponding Mission Control shortcuts in macOS System Settings. This is an inherent platform limitation.
 
 ### NFR-4: macOS Version Support
 Minimum macOS 13 (Ventura). `build.sh` compiles with `-target <arch>-apple-macos13.0` for both arm64 and x86_64 (universal binary) and verifies the declared minimum OS, so the binary's load commands agree with `LSMinimumSystemVersion`. All features work on macOS 13, 14 (Sonoma), 15 (Sequoia), and are expected to work on macOS 26 (Tahoe).
@@ -287,7 +287,7 @@ Advanced Settings reports Accessibility, Mission Control shortcut, and Screen Re
 Renaming uses a compact native panel with a focused name field, Return-to-rename, Escape-to-cancel, a standard primary Rename button, and a visually separate Remove Name action.
 
 ### FR-65: Searchable Display-Grouped Desktop List
-The popover groups desktop rows by physical display and filters them immediately by custom name or desktop number. Each row shows a clearly legible 17-point medium-weight display symbol in a 24×24 frame, its local position, resolved name, available Command-number shortcut, and a checkmark for the current desktop. Selecting a row closes the popover and navigates to that desktop.
+The popover groups desktop rows by physical display and filters them immediately by custom name or desktop number. Each row shows a clearly legible 17-point medium-weight display symbol in a 24×24 frame, its local position, resolved name, available Command-number shortcut, and a checkmark for the current desktop. Selecting a row closes the popover and navigates to that desktop. The three action buttons show their popover shortcut under their title (Rename ⌘N, Move Window ⌘M, Pin/Unpin Window ⌘P) and the Settings button shows ⌘, (v1.9.2); ⌘M and ⌘P are ignored while the corresponding feature is disabled, and Escape closes the popover.
 
 ### FR-66: Popover Actions and Status
 The popover presents large Rename, Move Window, and Pin/Unpin Window action cards. Each card has an explicit centered icon-and-label layout contained within a full-card border and click target, plus hover, disabled, tooltip, and accessibility states. Disabled features remain visible with explanatory tooltips. A footer summarizes the overlay and input-source-indicator state and opens Settings. A compact overflow menu contains About, Quit, and Unpin All when applicable.

@@ -122,7 +122,9 @@ This section describes the technical design for the "move focused window to Desk
 
 ### Approach
 
-Jumpee synthesizes the macOS built-in "Move window to Desktop N" keyboard shortcuts (Ctrl+Shift+N) via CGEvent, using the same mechanism already used by SpaceNavigator for space switching (Ctrl+N). No CGS private APIs are used for the move operation.
+Jumpee grabs the focused window's title bar with a synthesized mouse drag (Amethyst 0.22+ technique) and, while the button is held, synthesizes the Mission Control "Move left a space" / "Move right a space" shortcuts (Ctrl+Left / Ctrl+Right, symbolic hotkeys 79 / 81) once per desktop between the current and the target desktop, 450 ms apart; the mouse is released 400 ms after the last press and the window lands on the destination desktop, which macOS follows. `MenuBarController.desktopSteps(toGlobalPosition:)` converts the chosen desktop into a signed step count on the active display; destinations on another display are refused (the drag cannot cross displays).
+
+Until v1.9.2 the routine fired "Switch to Desktop N" (Ctrl+N) once while holding the window. On macOS 27.0 synthesized Ctrl+1..9 presses are ignored by the system hotkey layer regardless of event source, tap location or AppleScript, while synthesized Ctrl+arrow presses are honoured, so the relative-arrow variant is used exclusively. The original design text below predates that change where it mentions Ctrl+Shift+N or Ctrl+N for the move.
 
 This approach was chosen because the CGS space-assignment APIs (`CGSAddWindowsToSpaces`, `CGSRemoveWindowsFromSpaces`) are broken on macOS 15+ (Sequoia) due to Apple adding connection-rights checks to the WindowServer. System shortcut synthesis is the only reliable approach across macOS 13-26.
 
@@ -708,6 +710,20 @@ spaceDidChange()
 | "Displays have separate Spaces" OFF mode | Low | `CGSCopyManagedDisplaySpaces` returns a single display entry. All methods naturally fall back to single-display behavior — `localPosition == globalPosition`, one `DisplayInfo` element, overlay on the only screen. |
 | Private API behavior changes in future macOS versions | Medium | No new private APIs introduced. All new code uses public APIs (`CGDisplayCreateUUIDFromDisplayID`, `CGMainDisplayID`, `NSScreen`). Same baseline risk as current codebase. |
 
+### Popover Action Shortcuts (v1.9.2)
+
+`WorkspacePopoverActionButton` takes a `shortcut` string and renders it in a 10.5-point monospaced secondary-colour label under the title (icon / title / shortcut stacked vertically, 3-point spacing, 1 point between title and shortcut, inside the unchanged 104×72 intrinsic size); the accessibility label becomes "<title>, <shortcut>". The popover key handler maps ⌘N → rename, ⌘M → move window, ⌘P → pin/unpin window (both guarded by the button's enabled state so a disabled feature swallows the key instead of falling through), ⌘, → settings, ⌘Q → quit, ⌘1–9 → navigate. The footer Settings button carries "⌘," as a secondary-coloured suffix in its attributed title. The Settings ▸ Shortcuts pane lists the same fixed shortcuts under "Menu Shortcuts".
+
+### Focused Window Resolution (v1.9.2)
+
+`WindowMover.moveToSpace(index:targetApp:)` and `WindowPinner.getFocusedAppAndWindow()` obtain "the window the user is working in" through `FocusedWindowResolver.focusedAppAndWindow(preferring:)` instead of querying the system-wide Accessibility element directly. On macOS 27.0 the system-wide `kAXFocusedApplicationAttribute` query returns `kAXErrorCannotComplete` (-25204) even for a trusted process, which made both features return silently. The resolver builds candidate application elements in this order and returns the first one that reports a focused window:
+
+1. The application passed by the caller (`preferring:`), when it is not Jumpee itself.
+2. The system-wide focused application, when that query still succeeds.
+3. `NSWorkspace.shared.frontmostApplication` via `AXUIElementCreateApplication(pid)`, when it is not Jumpee itself.
+
+The workspace popover captures `previousApplication` (the app that was frontmost before the popover opened) inside its Move Window handler and passes it through `WorkspacePopoverController.moveWindowHandler: (NSRunningApplication?) -> Void` to `MenuBarController.openMoveWindowMenu(targetApp:)`. The destination menu stores that application in each item's `representedObject`, `moveWindowFromPopup(_:)` forwards it to `moveToSpace(index:targetApp:)`, and it is also the app whose focus is restored after the pop-up menu closes. The popover closes with `restoreFocus: false` for this action and runs the handler from `popoverDidClose` (via `afterCloseAction`) rather than on a timer: if it restored focus to the user's app, that activation would land while the pop-up `NSMenu` is open and dismiss it. `openMoveWindowMenu` is therefore responsible for handing focus back to `targetApp`, both after the menu closes and on every early exit. The global move-window hotkey passes nil because the user's app is still frontmost when the hotkey fires. Every early return in the move path prints a `[Jumpee:Move]` or `[Jumpee:Focus]` line so a failure is no longer silent.
+
 ## Move Window Hotkey, Hotkey Configuration UI, About Dialog (v1.3.0)
 
 This section describes the technical design for three features added in v1.3.0. The full technical design is in `docs/design/technical-design-v1.3.0-hotkey-about.md`. The implementation plan is in `docs/design/plan-005-hotkey-about-features.md`.
@@ -1061,7 +1077,7 @@ class WindowPinner {
 
 **Design notes:**
 - **Dictionary instead of Set:** `pinnedWindows` is `[CGWindowID: Int32]` (mapping window ID to its original level before pinning), not `Set<CGWindowID>`. This ensures we can restore the exact original level on unpin, which is important for windows that may already have non-standard levels (e.g., utility panels).
-- **`getFocusedWindowID()`** extracts the common AXUIElement pattern from `WindowMover.moveToSpace()` (lines 551-564) into a reusable static method. This is the same pattern: `AXUIElementCreateSystemWide()` -> `kAXFocusedApplicationAttribute` -> `kAXFocusedWindowAttribute` -> `_AXUIElementGetWindow`.
+- **`getFocusedWindowID()`** extracts the common AXUIElement pattern from `WindowMover.moveToSpace()` (lines 551-564) into a reusable static method. This is the same pattern: `AXUIElementCreateSystemWide()` -> `kAXFocusedApplicationAttribute` -> `kAXFocusedWindowAttribute` -> `_AXUIElementGetWindow`. Since v1.9.2 the first two steps are delegated to `FocusedWindowResolver` (see "Focused Window Resolution (v1.9.2)" in the Window Mover section), because the system-wide focused-application query fails on macOS 27.
 - **`cleanupClosedWindows()`** uses `CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID)` to enumerate all system windows and prunes any pinned entries not found. Called at the start of `togglePin()` and before menu rebuild.
 - **Pin level:** `Int32(CGWindowLevelForKey(.floatingWindow))` which evaluates to `3` (kCGFloatingWindowLevel). This places pinned windows above normal windows but below system UI (menu bar, Dock, etc.).
 - **`unpinAll()`** restores all pinned windows to their original levels. Called from `MenuBarController.quit()`.

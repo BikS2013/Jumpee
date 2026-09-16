@@ -12,7 +12,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="Jumpee"
-VERSION="1.9.1"
+VERSION="1.9.2"
 BUILD_DIR="$SCRIPT_DIR/build.noindex"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
