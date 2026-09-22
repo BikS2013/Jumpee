@@ -599,7 +599,13 @@ final class WorkspacePopoverController: NSObject, NSPopoverDelegate {
         popover.delegate = self
 
         contentController.onNavigate = { [weak self] globalPosition in
-            self?.close(restoreFocus: true)
+            // Re-activating the previous app after a desktop switch makes macOS jump
+            // back to the desktop holding that app's window, undoing the switch.
+            // Only hand focus back when the user picked the desktop they are already on.
+            let isCurrent = snapshotProvider().displays
+                .flatMap(\.spaces)
+                .contains { $0.globalPosition == globalPosition && $0.isCurrent }
+            self?.close(restoreFocus: isCurrent)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { navigateHandler(globalPosition) }
         }
         contentController.onDismiss = { [weak self] in
