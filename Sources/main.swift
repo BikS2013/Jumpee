@@ -1020,6 +1020,22 @@ class SpaceNavigator {
         step(pressesSent: 0)
     }
 
+    /// Restart the Dock (`killall Dock`; launchd relaunches it at once). The Dock carries
+    /// out Mission Control's desktop shortcuts, and on macOS 27 "Switch to Desktop N"
+    /// (Ctrl+1..9) can stop working, typed or synthesized, until it restarts. Windows,
+    /// desktops and their order are kept.
+    static func restartDock() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+        process.arguments = ["Dock"]
+        do {
+            try process.run()
+            NSLog("[Jumpee] Restarted the Dock")
+        } catch {
+            NSLog("[Jumpee] Could not restart the Dock: \(error)")
+        }
+    }
+
     /// Check whether "Switch to Desktop 1" (Ctrl+1), the first of the shortcuts
     /// navigation synthesizes, is enabled. Symbolic hotkey 118 = "Switch to Desktop 1".
     static func areSystemShortcutsEnabled() -> Bool {

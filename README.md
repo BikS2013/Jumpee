@@ -104,8 +104,10 @@ Desktop switching requires **Ctrl+1** through **Ctrl+9**, and moving windows req
 | Action | How |
 |--------|-----|
 | Open visual workspace popover | **Cmd+J** (global hotkey) or click the menu bar item |
-| Filter desktops | Type in the popover's search field |
+| Filter desktops | Type in the popover's search field; **↑/↓** select a desktop and **Return** switches to it |
 | Jump to a desktop | **Cmd+1..9** while the popover is open, or click its row |
+| Jump straight to a desktop from any app | **Ctrl+1..9** (macOS "Switch to Desktop N"; the popover's hint line shows the key for the selected desktop) |
+| Ctrl+1..9 or desktop switching stopped working | Click **Reset Dock** in the popover footer (restarts the Dock; windows and desktops are kept) |
 | Rename current desktop | **Cmd+N** or click **Rename** in the popover |
 | Open Settings | **Cmd+,** or click "Settings…" |
 | Configure menu, features, appearance, or hotkeys | Use the corresponding Settings pane |

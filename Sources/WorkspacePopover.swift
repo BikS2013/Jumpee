@@ -37,6 +37,10 @@ private final class WorkspacePopoverRowView: NSView {
     private let isCurrent: Bool
 
     var action: (() -> Void)?
+    /// Keyboard selection from the filter field's arrow keys.
+    var isSelected = false {
+        didSet { updateBackground() }
+    }
 
     init(item: WorkspacePopoverSpaceItem) {
         isCurrent = item.isCurrent
@@ -79,6 +83,9 @@ private final class WorkspacePopoverRowView: NSView {
         actionButton.target = self
         actionButton.action = #selector(performAction)
         actionButton.setAccessibilityLabel("Switch to Desktop \(item.localPosition), \(item.name)")
+        if item.globalPosition <= 9 {
+            toolTip = "⌃\(item.globalPosition) jumps straight to this desktop from any app"
+        }
 
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 44),
@@ -133,7 +140,11 @@ private final class WorkspacePopoverRowView: NSView {
     }
 
     private func updateBackground() {
-        if isCurrent {
+        layer?.borderWidth = isSelected ? 1.5 : 0
+        layer?.borderColor = NSColor.controlAccentColor.cgColor
+        if isSelected {
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.24).cgColor
+        } else if isCurrent {
             layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(isHovered ? 0.22 : 0.14).cgColor
         } else if isHovered {
             layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
@@ -277,8 +288,13 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
     private let statusDot = NSView()
     private let statusLabel = NSTextField(labelWithString: "")
     private let settingsButton = NSButton()
+    private let resetDockButton = NSButton()
     private let moreButton = NSButton()
+    private let hintLabel = NSTextField(labelWithString: "")
     private var snapshot: WorkspacePopoverSnapshot?
+    /// Rows currently shown (after filtering), in list order, with their items.
+    private var visibleRows: [(row: WorkspacePopoverRowView, item: WorkspacePopoverSpaceItem)] = []
+    private var selectedIndex: Int?
 
     var onNavigate: ((Int) -> Void)?
     var onDismiss: (() -> Void)?
@@ -287,6 +303,7 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
     var onPinWindow: (() -> Void)?
     var onUnpinAll: (() -> Void)?
     var onSettings: (() -> Void)?
+    var onResetDock: (() -> Void)?
     var onAbout: (() -> Void)?
     var onQuit: (() -> Void)?
 
@@ -349,6 +366,7 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         settingsButton.title = "Settings…  ⌘,"
         let settingsTitle = NSMutableAttributedString(string: "Settings…  ⌘,")
         settingsTitle.addAttributes(
@@ -362,7 +380,21 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
         settingsButton.bezelStyle = .rounded
         settingsButton.target = self
         settingsButton.action = #selector(openSettings)
-        let footerStack = NSStackView(views: [statusDot, statusLabel, settingsButton])
+        resetDockButton.title = "Reset Dock"
+        resetDockButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+        resetDockButton.imagePosition = .imageLeading
+        resetDockButton.bezelStyle = .rounded
+        resetDockButton.target = self
+        resetDockButton.action = #selector(resetDock)
+        resetDockButton.toolTip = "Restart the Dock. Use it when ⌃1–⌃9 or desktop switching stop working: they are handled by the Dock, which can get stuck. Windows and desktops are kept."
+        resetDockButton.setAccessibilityLabel("Reset Dock")
+
+        hintLabel.font = .systemFont(ofSize: 11)
+        hintLabel.textColor = .secondaryLabelColor
+        hintLabel.lineBreakMode = .byTruncatingTail
+        hintLabel.maximumNumberOfLines = 1
+
+        let footerStack = NSStackView(views: [statusDot, statusLabel, resetDockButton, settingsButton])
         footerStack.orientation = .horizontal
         footerStack.alignment = .centerY
         footerStack.spacing = 8
@@ -372,7 +404,7 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
         let lowerSeparator = NSBox()
         lowerSeparator.boxType = .separator
 
-        for child in [iconContainer, titleStack, moreButton, searchField, scrollView, upperSeparator, actionStack, lowerSeparator, footerStack] {
+        for child in [iconContainer, titleStack, moreButton, searchField, scrollView, hintLabel, upperSeparator, actionStack, lowerSeparator, footerStack] {
             child.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(child)
         }
@@ -403,11 +435,15 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
             scrollView.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: searchField.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: searchField.bottomAnchor, constant: 10),
-            scrollView.heightAnchor.constraint(equalToConstant: 286),
+            scrollView.heightAnchor.constraint(equalToConstant: 262),
+
+            hintLabel.leadingAnchor.constraint(equalTo: searchField.leadingAnchor, constant: 2),
+            hintLabel.trailingAnchor.constraint(equalTo: searchField.trailingAnchor, constant: -2),
+            hintLabel.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 8),
 
             upperSeparator.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
             upperSeparator.trailingAnchor.constraint(equalTo: searchField.trailingAnchor),
-            upperSeparator.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 9),
+            upperSeparator.topAnchor.constraint(equalTo: hintLabel.bottomAnchor, constant: 8),
 
             actionStack.leadingAnchor.constraint(equalTo: searchField.leadingAnchor),
             actionStack.trailingAnchor.constraint(equalTo: searchField.trailingAnchor),
@@ -425,6 +461,7 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
             statusDot.widthAnchor.constraint(equalToConstant: 10),
             statusDot.heightAnchor.constraint(equalToConstant: 10),
             settingsButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 104),
+            resetDockButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 96),
         ])
     }
 
@@ -483,6 +520,54 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
 
     func controlTextDidChange(_ notification: Notification) {
         rebuildDesktopRows()
+        // While filtering, keep the first match selected so Return switches to it.
+        let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        select(query.isEmpty || visibleRows.isEmpty ? nil : 0)
+    }
+
+    /// Arrow keys and Return in the filter field drive the desktop list below it.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        switch commandSelector {
+        case #selector(NSResponder.moveDown(_:)):
+            guard !visibleRows.isEmpty else { return true }
+            select(selectedIndex.map { min($0 + 1, visibleRows.count - 1) } ?? 0)
+            return true
+        case #selector(NSResponder.moveUp(_:)):
+            guard !visibleRows.isEmpty else { return true }
+            select(selectedIndex.map { max($0 - 1, 0) } ?? visibleRows.count - 1)
+            return true
+        case #selector(NSResponder.insertNewline(_:)):
+            guard let selectedIndex, visibleRows.indices.contains(selectedIndex) else { return true }
+            onNavigate?(visibleRows[selectedIndex].item.globalPosition)
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func select(_ index: Int?) {
+        selectedIndex = index
+        for (offset, entry) in visibleRows.enumerated() {
+            entry.row.isSelected = offset == index
+        }
+        if let index, visibleRows.indices.contains(index) {
+            let row = visibleRows[index].row
+            row.scrollToVisible(row.bounds.insetBy(dx: 0, dy: -6))
+        }
+        updateHint()
+    }
+
+    private func updateHint() {
+        if let selectedIndex, visibleRows.indices.contains(selectedIndex) {
+            let item = visibleRows[selectedIndex].item
+            if item.globalPosition <= 9 {
+                hintLabel.stringValue = "⌃\(item.globalPosition) jumps straight to “\(item.name)” from any app · ↩ switches now"
+            } else {
+                hintLabel.stringValue = "↩ switches to “\(item.name)” · no ⌃ shortcut beyond Desktop 9"
+            }
+        } else {
+            hintLabel.stringValue = "Tip: ⌃1–⌃9 jump straight to a desktop from any app · ↑↓ select"
+        }
     }
 
     private func rebuildDesktopRows() {
@@ -490,7 +575,9 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
             desktopStack.removeArrangedSubview(child)
             child.removeFromSuperview()
         }
-        guard let snapshot else { return }
+        visibleRows = []
+        selectedIndex = nil
+        guard let snapshot else { updateHint(); return }
         let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         var contentHeight: CGFloat = 0
         var resultCount = 0
@@ -515,6 +602,7 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
             for item in matches {
                 let row = WorkspacePopoverRowView(item: item)
                 row.action = { [weak self] in self?.onNavigate?(item.globalPosition) }
+                visibleRows.append((row, item))
                 desktopStack.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: desktopStack.widthAnchor).isActive = true
                 contentHeight += 48
@@ -537,9 +625,11 @@ private final class WorkspacePopoverContentViewController: NSViewController, NSS
         documentView.frame = NSRect(x: 0, y: 0, width: width, height: height)
         desktopStack.frame = documentView.bounds.insetBy(dx: 0, dy: 2)
         desktopStack.autoresizingMask = [.width, .height]
+        updateHint()
     }
 
     @objc private func openSettings() { onSettings?() }
+    @objc private func resetDock() { onResetDock?() }
 
     @objc private func showMoreMenu() {
         let menu = NSMenu()
@@ -574,6 +664,11 @@ final class WorkspacePopoverController: NSObject, NSPopoverDelegate {
     private var cursorAnchorWindow: NSWindow?
     private var previousApplication: NSRunningApplication?
     private var restorePreviousApplication = true
+    /// Active space when the popover opened. Focus is handed back to the previous app
+    /// only while this is still the active space: re-activating that app after a
+    /// desktop switch (e.g. the user pressed ⌃N with the popover open) would make macOS
+    /// jump back to the desktop holding its window.
+    private var spaceWhenShown: Int?
     private var keyMonitor: Any?
     /// Work to run once the popover has fully closed (after its dismissal animation),
     /// e.g. opening the Move Window destination menu.
@@ -633,6 +728,10 @@ final class WorkspacePopoverController: NSObject, NSPopoverDelegate {
             unpinAllHandler()
             self?.refresh()
         }
+        contentController.onResetDock = { [weak self] in
+            self?.close(restoreFocus: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { SpaceNavigator.restartDock() }
+        }
         contentController.onSettings = { [weak self] in
             self?.close(restoreFocus: false)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { settingsHandler() }
@@ -669,6 +768,7 @@ final class WorkspacePopoverController: NSObject, NSPopoverDelegate {
     private func show(from statusButton: NSStatusBarButton?, atCursor: Bool) {
         previousApplication = NSWorkspace.shared.frontmostApplication
         restorePreviousApplication = true
+        spaceWhenShown = CGSGetActiveSpace(CGSMainConnectionID())
         refresh()
 
         if atCursor || statusButton == nil {
@@ -711,9 +811,18 @@ final class WorkspacePopoverController: NSObject, NSPopoverDelegate {
         if restorePreviousApplication,
            let previousApplication,
            previousApplication.bundleIdentifier != Bundle.main.bundleIdentifier {
-            previousApplication.activate()
+            // A ⌃N switch may close the popover before the new space registers, so check
+            // the space now and once more shortly after.
+            let shownSpace = spaceWhenShown
+            let stillOnShownSpace = { CGSGetActiveSpace(CGSMainConnectionID()) == shownSpace }
+            if stillOnShownSpace() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    if stillOnShownSpace() { previousApplication.activate() }
+                }
+            }
         }
         previousApplication = nil
+        spaceWhenShown = nil
         restorePreviousApplication = true
         if let afterCloseAction {
             self.afterCloseAction = nil
