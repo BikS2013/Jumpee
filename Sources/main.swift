@@ -365,6 +365,13 @@ struct DisplayInfo {
     let spaces: [SpaceInfo]
 }
 
+/// A desktop to reach with Ctrl+Left/Right on the active display.
+struct DesktopRoute {
+    let displaySpaceIDs: [Int]  // every space ID of the active display, left to right
+    let targetSpaceID: Int
+    let steps: Int              // signed desktops from the current one when planned
+}
+
 class SpaceDetector {
     let connectionID: Int32
 
@@ -410,6 +417,15 @@ class SpaceDetector {
         return getAllSpaceIDs().enumerated().map { (index, id) in
             (position: index + 1, spaceID: id)
         }
+    }
+
+    /// Every space on the display, left to right, including full-screen app spaces:
+    /// Ctrl+Left/Right steps through those too, so routes must count them.
+    func allSpaceIDsInOrder(onDisplay displayID: String) -> [Int] {
+        let spacesInfo = CGSCopyManagedDisplaySpaces(connectionID) as! [[String: Any]]
+        guard let display = spacesInfo.first(where: { ($0["Display Identifier"] as? String) == displayID }),
+              let spaceList = display["Spaces"] as? [[String: Any]] else { return [] }
+        return spaceList.compactMap { $0["ManagedSpaceID"] as? Int }
     }
 
     func getSpacesByDisplay() -> [DisplayInfo] {
@@ -908,87 +924,100 @@ class SpaceNavigator {
     /// lands while the previous switch animation is still running is dropped by macOS
     /// (most often while a window is held), so presses wait for each switch.
     static let settleInterval: TimeInterval = 0.2
-    /// How long a press may take to change the active desktop before it is re-sent.
-    static let switchTimeout: TimeInterval = 1.0
-    /// Presses sent for one desktop step before the remaining steps are abandoned.
-    static let maxAttemptsPerStep = 3
+    /// How long to wait for a press to change the active desktop before pressing again.
+    /// A switch normally registers 0.5-0.6 s after the press; under load it can take
+    /// longer, so this is generous. A late switch cannot overshoot anyway: every press
+    /// is planned from the desktop that is actually active.
+    static let switchTimeout: TimeInterval = 2.5
 
-    /// Switch `steps` desktops to the right (positive) or left (negative) on the active
-    /// display by pressing the Mission Control "Move left/right a space" shortcut
-    /// (Ctrl+Left / Ctrl+Right) once per desktop.
+    /// Switch to `route.targetSpaceID` on the active display with the Mission Control
+    /// "Move left/right a space" shortcuts (Ctrl+Left / Ctrl+Right).
     ///
     /// On macOS 27 synthesized "Switch to Desktop N" (Ctrl+1..9) presses are ignored by the
     /// system hotkey layer, while synthesized Ctrl+Left/Right presses are honoured, so
     /// navigation within a display uses the relative shortcut.
-    static func navigate(bySteps steps: Int) {
-        NSLog("[Jumpee:Navigate] Switching \(abs(steps)) desktop(s) \(steps > 0 ? "right" : "left")")
-        pressSpaceArrow(steps: steps, logTag: "Navigate") { _ in }
+    static func navigate(along route: DesktopRoute) {
+        NSLog("[Jumpee:Navigate] Switching \(abs(route.steps)) desktop(s) \(route.steps > 0 ? "right" : "left")")
+        pressSpaceArrow(route: route, logTag: "Navigate") { _ in }
     }
 
-    /// Press Ctrl+Left/Right `steps` times, one desktop at a time: after each press wait
-    /// until the active space has changed (re-sending the press if it has not within
-    /// `switchTimeout`), let the switch settle, then press again. The hotkey is enabled
-    /// for the duration if the user has it disabled. `completion` runs on the main queue
-    /// with the number of desktops actually switched.
-    static func pressSpaceArrow(steps: Int, logTag: String, completion: @escaping (Int) -> Void) {
-        guard steps != 0 else { completion(0); return }
-        let symbolicHotKey = steps > 0 ? WindowMover.moveRightHotKey : WindowMover.moveLeftHotKey
-        var keyCode: CGKeyCode = 0
-        var modifierFlags: CGEventFlags = []
-        let error = CGSGetSymbolicHotKeyValue(symbolicHotKey, nil, &keyCode, &modifierFlags)
-        guard error == 0 else {
-            NSLog("[Jumpee:\(logTag)] CGSGetSymbolicHotKeyValue(\(symbolicHotKey)) failed with \(error)")
-            completion(0)
+    /// Steer to `route.targetSpaceID` one desktop at a time. Before every press the
+    /// active desktop is read and the direction chosen from it, so a press that macOS
+    /// dropped is simply sent again and a switch that registered late (after the next
+    /// press was already sent) is corrected instead of overshooting. After each press
+    /// wait until the active space changes (or `switchTimeout`), let the switch settle,
+    /// then re-plan. The shortcuts are enabled for the duration if the user has them
+    /// disabled. `completion` runs on the main queue with whether the target was reached.
+    static func pressSpaceArrow(route: DesktopRoute, logTag: String, completion: @escaping (Bool) -> Void) {
+        guard let targetIndex = route.displaySpaceIDs.firstIndex(of: route.targetSpaceID) else {
+            completion(false)
             return
         }
-
-        let wasEnabled = CGSIsSymbolicHotKeyEnabled(symbolicHotKey)
-        if !wasEnabled {
-            _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, true)
-        }
-        let connection = CGSMainConnectionID()
-        let total = abs(steps)
-
-        func finish(_ done: Int) {
-            if !wasEnabled { _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, false) }
-            if done < total {
-                NSLog("[Jumpee:\(logTag)] Stopped after \(done) of \(total) desktop(s): the switch did not register")
+        var shortcuts: [Int: (keyCode: CGKeyCode, flags: CGEventFlags)] = [:]
+        for (direction, hotKey) in [(1, WindowMover.moveRightHotKey), (-1, WindowMover.moveLeftHotKey)] {
+            var keyCode: CGKeyCode = 0
+            var modifierFlags: CGEventFlags = []
+            let error = CGSGetSymbolicHotKeyValue(hotKey, nil, &keyCode, &modifierFlags)
+            guard error == 0 else {
+                NSLog("[Jumpee:\(logTag)] CGSGetSymbolicHotKeyValue(\(hotKey)) failed with \(error)")
+                completion(false)
+                return
             }
-            completion(done)
+            shortcuts[direction] = (keyCode, modifierFlags)
         }
 
-        func press(done: Int, attempt: Int) {
-            guard done < total else { finish(done); return }
-            let before = CGSGetActiveSpace(connection)
-            if let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) {
-                keyDown.flags = modifierFlags
+        let hotKeys = [WindowMover.moveLeftHotKey, WindowMover.moveRightHotKey]
+        let disabled = hotKeys.filter { !CGSIsSymbolicHotKeyEnabled($0) }
+        for hotKey in disabled { _ = CGSSetSymbolicHotKeyEnabled(hotKey, true) }
+        let connection = CGSMainConnectionID()
+        // Enough for every planned step, a few dropped presses and a correction.
+        let maxPresses = abs(route.steps) * 2 + 3
+
+        func finish(_ reached: Bool) {
+            for hotKey in disabled { _ = CGSSetSymbolicHotKeyEnabled(hotKey, false) }
+            if !reached {
+                NSLog("[Jumpee:\(logTag)] Gave up before reaching space \(route.targetSpaceID); active space \(CGSGetActiveSpace(connection))")
+            }
+            completion(reached)
+        }
+
+        func step(pressesSent: Int) {
+            let current = CGSGetActiveSpace(connection)
+            guard let currentIndex = route.displaySpaceIDs.firstIndex(of: current) else {
+                NSLog("[Jumpee:\(logTag)] Active space \(current) is not on the route's display")
+                finish(false)
+                return
+            }
+            guard currentIndex != targetIndex else { finish(true); return }
+            guard pressesSent < maxPresses else { finish(false); return }
+
+            let direction = targetIndex > currentIndex ? 1 : -1
+            let shortcut = shortcuts[direction]!
+            if let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: shortcut.keyCode, keyDown: true) {
+                keyDown.flags = shortcut.flags
                 keyDown.post(tap: .cghidEventTap)
             }
             usleep(40_000)
-            if let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) {
-                keyUp.flags = modifierFlags
+            if let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: shortcut.keyCode, keyDown: false) {
+                keyUp.flags = shortcut.flags
                 keyUp.post(tap: .cghidEventTap)
             }
             let deadline = Date().addingTimeInterval(switchTimeout)
             func poll() {
-                if CGSGetActiveSpace(connection) != before {
+                if CGSGetActiveSpace(connection) != current {
                     DispatchQueue.main.asyncAfter(deadline: .now() + settleInterval) {
-                        press(done: done + 1, attempt: 1)
+                        step(pressesSent: pressesSent + 1)
                     }
                 } else if Date() > deadline {
-                    if attempt >= maxAttemptsPerStep {
-                        finish(done)
-                    } else {
-                        NSLog("[Jumpee:\(logTag)] Press \(done + 1) of \(total) did not switch; re-sending")
-                        press(done: done, attempt: attempt + 1)
-                    }
+                    NSLog("[Jumpee:\(logTag)] Press did not switch within \(switchTimeout)s; re-planning")
+                    step(pressesSent: pressesSent + 1)
                 } else {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { poll() }
                 }
             }
             poll()
         }
-        press(done: 0, attempt: 1)
+        step(pressesSent: 0)
     }
 
     /// Check whether "Switch to Desktop 1" (Ctrl+1), the first of the shortcuts
@@ -1100,10 +1129,11 @@ class WindowMover {
     /// "Move left/right a space" shortcuts to be enabled in System Settings.
     ///
     /// - Parameters:
-    ///   - steps: Signed number of desktops to move on the current display; 0 is a no-op.
+    ///   - route: The destination desktop on the active display (see `DesktopRoute`).
     ///   - targetApp: The application that owned the focused window when the user asked
     ///     for the move (see `FocusedWindowResolver`). Nil means "whatever is frontmost".
-    static func moveWindow(byDesktops steps: Int, targetApp: NSRunningApplication? = nil) {
+    static func moveWindow(along route: DesktopRoute, targetApp: NSRunningApplication? = nil) {
+        let steps = route.steps
         guard steps != 0 else {
             NSLog("[Jumpee:Move] Target desktop is the current one; nothing to do")
             return
@@ -1183,10 +1213,10 @@ class WindowMover {
         //    switch to register (a press sent mid-animation is dropped), then release
         //    the mouse 400ms after the last switch.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            SpaceNavigator.pressSpaceArrow(steps: steps, logTag: "Move") { done in
+            SpaceNavigator.pressSpaceArrow(route: route, logTag: "Move") { reached in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
                     upEvent.post(tap: .cghidEventTap)
-                    NSLog("[Jumpee:Move] Released window after \(done) of \(abs(steps)) desktop(s)")
+                    NSLog("[Jumpee:Move] Released window (\(reached ? "at the destination" : "short of the destination"))")
                 }
             }
         }
@@ -1902,28 +1932,37 @@ class MenuBarController: NSObject {
     @objc private func moveWindowFromPopup(_ sender: NSMenuItem) {
         let targetGlobalPosition = sender.tag
         let targetApp = sender.representedObject as? NSRunningApplication
-        guard let steps = desktopSteps(toGlobalPosition: targetGlobalPosition) else { return }
+        guard let route = desktopRoute(toGlobalPosition: targetGlobalPosition) else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            WindowMover.moveWindow(byDesktops: steps, targetApp: targetApp)
+            WindowMover.moveWindow(along: route, targetApp: targetApp)
         }
     }
 
-    /// Signed number of desktops between the current desktop and the desktop at
-    /// `globalPosition`, on the active display. Nil when the target is not on the active
-    /// display (the mover drags with Ctrl+Left/Right, which cannot cross displays).
-    private func desktopSteps(toGlobalPosition globalPosition: Int) -> Int? {
+    /// Route from the current desktop to the desktop at `globalPosition` on the active
+    /// display. Nil when the target is not on the active display (Ctrl+Left/Right, used
+    /// by navigation and the mover, cannot cross displays).
+    private func desktopRoute(toGlobalPosition globalPosition: Int) -> DesktopRoute? {
         guard let current = spaceDetector.getCurrentSpaceInfo() else {
             NSLog("[Jumpee] No current space info")
             return nil
         }
-        let target = spaceDetector.getSpacesByDisplay()
-            .first { $0.displayID == current.displayID }?
-            .spaces.first { $0.globalPosition == globalPosition }
-        guard let target else {
+        let displaySpaces = spaceDetector.getSpacesByDisplay()
+            .first { $0.displayID == current.displayID }?.spaces ?? []
+        guard let target = displaySpaces.first(where: { $0.globalPosition == globalPosition }) else {
             NSLog("[Jumpee] Desktop \(globalPosition) is not on the active display")
             return nil
         }
-        return target.localPosition - current.localPosition
+        let orderedIDs = spaceDetector.allSpaceIDsInOrder(onDisplay: current.displayID)
+        guard let currentIndex = orderedIDs.firstIndex(of: current.spaceID),
+              let targetIndex = orderedIDs.firstIndex(of: target.spaceID) else {
+            NSLog("[Jumpee] Desktop \(globalPosition) is missing from the display's space order")
+            return nil
+        }
+        return DesktopRoute(
+            displaySpaceIDs: orderedIDs,
+            targetSpaceID: target.spaceID,
+            steps: targetIndex - currentIndex
+        )
     }
 
     private func migratePositionBasedConfig() {
@@ -2260,8 +2299,8 @@ class MenuBarController: NSObject {
     /// macOS 27 honours; Ctrl+N (ignored there when synthesized) is only used for a
     /// desktop on another display, which the relative shortcut cannot reach.
     private func switchToSpace(globalPosition: Int) {
-        if let steps = desktopSteps(toGlobalPosition: globalPosition) {
-            SpaceNavigator.navigate(bySteps: steps)
+        if let route = desktopRoute(toGlobalPosition: globalPosition) {
+            SpaceNavigator.navigate(along: route)
         } else {
             SpaceNavigator.navigateToSpace(index: globalPosition)
         }
@@ -2284,12 +2323,12 @@ class MenuBarController: NSObject {
     @objc private func moveWindowToSpace(_ sender: NSMenuItem) {
         let targetGlobalPosition = sender.tag
         statusItem.menu?.cancelTracking()
-        guard let steps = desktopSteps(toGlobalPosition: targetGlobalPosition) else { return }
+        guard let route = desktopRoute(toGlobalPosition: targetGlobalPosition) else { return }
 
         // Wait 300ms for Jumpee's menu to close and the target app to regain focus.
         // This is the same delay used by navigateToSpace(_:) and is proven reliable.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            WindowMover.moveWindow(byDesktops: steps)
+            WindowMover.moveWindow(along: route)
         }
     }
 
