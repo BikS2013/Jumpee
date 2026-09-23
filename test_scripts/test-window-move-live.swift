@@ -3,6 +3,9 @@
 // destination desktop. Usage:
 //   test-window-move-live --list                      list desktops (global index, space id)
 //   test-window-move-live --app TextEdit --dest 2     drag TextEdit window 2 desktops right (negative = left)
+//   optional: --closed-loop waits for each switch before the next press (the v1.9.4 routine)
+//   optional: --interval <seconds> between arrow presses (default 0.45); the active space
+//   is logged before every press so a stalled multi-desktop drag shows where it stopped.
 // Build: DEVELOPER_DIR=/Library/Developer/CommandLineTools swiftc -O -framework Cocoa \
 //        -F /System/Library/PrivateFrameworks -o /tmp/wmlive test_scripts/test-window-move-live.swift
 import Cocoa
@@ -53,6 +56,7 @@ app.activate()
 usleep(500_000)
 log("frontmost now: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")")
 
+let interval: Double = args.firstIndex(of: "--interval").flatMap { i in i + 1 < args.count ? Double(args[i + 1]) : nil } ?? 0.45
 let steps = abs(dest); let hk = CGSSymbolicHotKey(dest > 0 ? 81 : 79)
 var keyCode: CGKeyCode = 0; var flags: CGEventFlags = []
 let err = CGSGetSymbolicHotKeyValue(hk, nil, &keyCode, &flags)
@@ -97,26 +101,51 @@ let moveE = mk(.mouseMoved), downE = mk(.leftMouseDown), dragE = mk(.leftMouseDr
 moveE.flags = []; downE.flags = []; upE.flags = []
 log("posting move/down/drag")
 moveE.post(tap: .cghidEventTap); downE.post(tap: .cghidEventTap); dragE.post(tap: .cghidEventTap)
-func pressArrow(_ remaining: Int) {
-    if remaining == 0 {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
-            log("posting mouse up"); upE.post(tap: .cghidEventTap)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                let after = CGSGetActiveSpace(CGSMainConnectionID())
-                log("active space after: \(after) (was \(active))")
-                let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-                let onscreen = list.contains { ($0[kCGWindowOwnerPID as String] as? Int32) == app.processIdentifier && ($0[kCGWindowLayer as String] as? Int) == 0 }
-                log("app has on-screen window on active space: \(onscreen)")
-                exit(0)
-            }
+func finish() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
+        log("posting mouse up"); upE.post(tap: .cghidEventTap)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            let after = CGSGetActiveSpace(CGSMainConnectionID())
+            log("active space after: \(after) (was \(active))")
+            let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+            let onscreen = list.contains { ($0[kCGWindowOwnerPID as String] as? Int32) == app.processIdentifier && ($0[kCGWindowLayer as String] as? Int) == 0 }
+            log("app has on-screen window on active space: \(onscreen)")
+            exit(0)
         }
-        return
     }
-    log("posting Ctrl+arrow (\(remaining) left)")
+}
+func postArrow() {
     if let kd = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) { kd.flags = flags; kd.post(tap: .cghidEventTap) }
     usleep(40_000)
     if let ku = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) { ku.flags = flags; ku.post(tap: .cghidEventTap) }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { pressArrow(remaining - 1) }
 }
-DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { pressArrow(steps) }
+// Open loop (the pre-v1.9.4 routine): fixed interval between presses.
+func pressArrow(_ remaining: Int) {
+    if remaining == 0 { finish(); return }
+    log("posting Ctrl+arrow (\(remaining) left), active space \(CGSGetActiveSpace(CGSMainConnectionID()))")
+    postArrow()
+    DispatchQueue.main.asyncAfter(deadline: .now() + interval) { pressArrow(remaining - 1) }
+}
+// Closed loop (--closed-loop): press, wait until the active space changes, let the
+// animation settle for --interval seconds, then press again; re-press when a press
+// produced no change within 1 s.
+func closedLoop(_ remaining: Int, attempts: Int = 0) {
+    if remaining == 0 { finish(); return }
+    let before = CGSGetActiveSpace(CGSMainConnectionID())
+    log("posting Ctrl+arrow (\(remaining) left, attempt \(attempts + 1)), active space \(before)")
+    postArrow()
+    let deadline = Date().addingTimeInterval(1.0)
+    func poll() {
+        if CGSGetActiveSpace(CGSMainConnectionID()) != before {
+            DispatchQueue.main.asyncAfter(deadline: .now() + interval) { closedLoop(remaining - 1) }
+        } else if Date() > deadline {
+            if attempts >= 2 { log("no change after 3 presses; giving up"); finish() } else { closedLoop(remaining, attempts: attempts + 1) }
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { poll() }
+        }
+    }
+    poll()
+}
+let closed = args.contains("--closed-loop")
+DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { closed ? closedLoop(steps) : pressArrow(steps) }
 RunLoop.main.run()

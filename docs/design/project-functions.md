@@ -19,7 +19,7 @@ The current space's custom name is displayed in the macOS menu bar. The format i
 A transient visual popover lists all desktops with their custom names, groups them by display, and supports filtering. Clicking a desktop row navigates to it. The popover opens by clicking the menu bar item or using the global hotkey.
 
 ### FR-5: Space Navigation
-Users can navigate to any desktop by clicking its popover row or by pressing Cmd+1 through Cmd+9 while the popover is open. Navigation uses CGEvent synthesis to trigger the macOS Ctrl+N system shortcuts.
+Users can navigate to any desktop by clicking its popover row or by pressing Cmd+1 through Cmd+9 while the popover is open. Navigation uses CGEvent synthesis of the Mission Control "Move left/right a space" shortcuts (Ctrl+Left / Ctrl+Right), pressed once per desktop between the current and the target desktop on the active display (v1.9.4); a desktop on another display is reached with the "Switch to Desktop N" shortcut (Ctrl+N). On macOS 27 synthesized Ctrl+1..9 presses are ignored by the system, so Ctrl+N navigation only works on earlier releases.
 
 ### FR-6: Global Hotkey
 A configurable global hotkey (default: Cmd+J) opens or closes the Jumpee popover from anywhere. The hotkey is registered via the Carbon `RegisterEventHotKey` API.
@@ -41,7 +41,7 @@ Jumpee runs as an LSUIElement accessory app with no Dock icon. It has no persist
 On multi-display setups, Jumpee detects the active display and groups spaces under their physical display names in the popover. Each display's spaces are numbered independently (per-display local positions); Command-number shortcuts are shown for the active display.
 
 ### FR-11: Per-Display Popover Numbering
-Popover-row keyboard shortcuts (Cmd+1-9) correspond to per-display local positions on the active display, not global positions. Navigation uses the global position internally (Ctrl+N system shortcut).
+Popover-row keyboard shortcuts (Cmd+1-9) correspond to per-display local positions on the active display, not global positions. Navigation converts the global position into a step count on the active display (Ctrl+Left / Ctrl+Right, v1.9.4), and falls back to the global Ctrl+N shortcut only for a desktop on another display.
 
 ### FR-12: Per-Display Overlay Positioning
 The overlay watermark appears on the active display's screen and repositions when the user switches to a different display.
@@ -54,7 +54,7 @@ Jumpee responds to display connection and disconnection events (`didChangeScreen
 ## 3. Move Window to Desktop (v1.2 - Implemented)
 
 ### FR-14: Move Focused Window to Target Desktop
-The user can move the currently focused (frontmost) application window from the current desktop to a specified target desktop on the same display. Jumpee grabs the window's title bar with a synthesized mouse drag and, while holding it, presses the Mission Control "Move left/right a space" shortcut (Ctrl+Left / Ctrl+Right) once per desktop between the current and the target desktop (v1.9.2). The desktop follows the window.
+The user can move the currently focused (frontmost) application window from the current desktop to a specified target desktop on the same display. Jumpee grabs the window's title bar with a synthesized mouse drag and, while holding it, presses the Mission Control "Move left/right a space" shortcut (Ctrl+Left / Ctrl+Right) once per desktop between the current and the target desktop (v1.9.2), waiting for each desktop switch to register before the next press (v1.9.4), so moves across several desktops arrive at the chosen desktop. The desktop follows the window.
 
 **Prerequisite:** The user must enable the "Move left a space" and "Move right a space" shortcuts in System Settings > Keyboard > Keyboard Shortcuts > Mission Control.
 
@@ -140,7 +140,7 @@ Jumpee is a small native Swift app with no external dependencies. The build uses
 Jumpee requires Accessibility permissions for CGEvent synthesis (space navigation and window moving). The app prompts for this on first launch.
 
 ### NFR-3: System Shortcut Dependency
-Space navigation (Ctrl+N) and window moving (Ctrl+Left / Ctrl+Right while dragging) both require the user to enable the corresponding Mission Control shortcuts in macOS System Settings. This is an inherent platform limitation.
+Space navigation (Ctrl+Left / Ctrl+Right within a display, Ctrl+N across displays) and window moving (Ctrl+Left / Ctrl+Right while dragging) both require the user to enable the corresponding Mission Control shortcuts in macOS System Settings. This is an inherent platform limitation.
 
 ### NFR-4: macOS Version Support
 Minimum macOS 13 (Ventura). `build.sh` compiles with `-target <arch>-apple-macos13.0` for both arm64 and x86_64 (universal binary) and verifies the declared minimum OS, so the binary's load commands agree with `LSMinimumSystemVersion`. All features work on macOS 13, 14 (Sonoma), 15 (Sequoia), and are expected to work on macOS 26 (Tahoe).

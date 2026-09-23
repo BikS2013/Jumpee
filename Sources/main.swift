@@ -904,6 +904,93 @@ class SpaceNavigator {
         }
     }
 
+    /// Pause after a desktop switch has registered before the next press. A press that
+    /// lands while the previous switch animation is still running is dropped by macOS
+    /// (most often while a window is held), so presses wait for each switch.
+    static let settleInterval: TimeInterval = 0.2
+    /// How long a press may take to change the active desktop before it is re-sent.
+    static let switchTimeout: TimeInterval = 1.0
+    /// Presses sent for one desktop step before the remaining steps are abandoned.
+    static let maxAttemptsPerStep = 3
+
+    /// Switch `steps` desktops to the right (positive) or left (negative) on the active
+    /// display by pressing the Mission Control "Move left/right a space" shortcut
+    /// (Ctrl+Left / Ctrl+Right) once per desktop.
+    ///
+    /// On macOS 27 synthesized "Switch to Desktop N" (Ctrl+1..9) presses are ignored by the
+    /// system hotkey layer, while synthesized Ctrl+Left/Right presses are honoured, so
+    /// navigation within a display uses the relative shortcut.
+    static func navigate(bySteps steps: Int) {
+        NSLog("[Jumpee:Navigate] Switching \(abs(steps)) desktop(s) \(steps > 0 ? "right" : "left")")
+        pressSpaceArrow(steps: steps, logTag: "Navigate") { _ in }
+    }
+
+    /// Press Ctrl+Left/Right `steps` times, one desktop at a time: after each press wait
+    /// until the active space has changed (re-sending the press if it has not within
+    /// `switchTimeout`), let the switch settle, then press again. The hotkey is enabled
+    /// for the duration if the user has it disabled. `completion` runs on the main queue
+    /// with the number of desktops actually switched.
+    static func pressSpaceArrow(steps: Int, logTag: String, completion: @escaping (Int) -> Void) {
+        guard steps != 0 else { completion(0); return }
+        let symbolicHotKey = steps > 0 ? WindowMover.moveRightHotKey : WindowMover.moveLeftHotKey
+        var keyCode: CGKeyCode = 0
+        var modifierFlags: CGEventFlags = []
+        let error = CGSGetSymbolicHotKeyValue(symbolicHotKey, nil, &keyCode, &modifierFlags)
+        guard error == 0 else {
+            NSLog("[Jumpee:\(logTag)] CGSGetSymbolicHotKeyValue(\(symbolicHotKey)) failed with \(error)")
+            completion(0)
+            return
+        }
+
+        let wasEnabled = CGSIsSymbolicHotKeyEnabled(symbolicHotKey)
+        if !wasEnabled {
+            _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, true)
+        }
+        let connection = CGSMainConnectionID()
+        let total = abs(steps)
+
+        func finish(_ done: Int) {
+            if !wasEnabled { _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, false) }
+            if done < total {
+                NSLog("[Jumpee:\(logTag)] Stopped after \(done) of \(total) desktop(s): the switch did not register")
+            }
+            completion(done)
+        }
+
+        func press(done: Int, attempt: Int) {
+            guard done < total else { finish(done); return }
+            let before = CGSGetActiveSpace(connection)
+            if let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) {
+                keyDown.flags = modifierFlags
+                keyDown.post(tap: .cghidEventTap)
+            }
+            usleep(40_000)
+            if let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) {
+                keyUp.flags = modifierFlags
+                keyUp.post(tap: .cghidEventTap)
+            }
+            let deadline = Date().addingTimeInterval(switchTimeout)
+            func poll() {
+                if CGSGetActiveSpace(connection) != before {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + settleInterval) {
+                        press(done: done + 1, attempt: 1)
+                    }
+                } else if Date() > deadline {
+                    if attempt >= maxAttemptsPerStep {
+                        finish(done)
+                    } else {
+                        NSLog("[Jumpee:\(logTag)] Press \(done + 1) of \(total) did not switch; re-sending")
+                        press(done: done, attempt: attempt + 1)
+                    }
+                } else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { poll() }
+                }
+            }
+            poll()
+        }
+        press(done: 0, attempt: 1)
+    }
+
     /// Check whether "Switch to Desktop 1" (Ctrl+1), the first of the shortcuts
     /// navigation synthesizes, is enabled. Symbolic hotkey 118 = "Switch to Desktop 1".
     static func areSystemShortcutsEnabled() -> Bool {
@@ -996,17 +1083,14 @@ class WindowMover {
     static let moveLeftHotKey: CGSSymbolicHotKey = 79
     static let moveRightHotKey: CGSSymbolicHotKey = 81
 
-    /// Delay between two consecutive arrow presses while the window is held. The space
-    /// switch animation must have started before the next press is honoured.
-    static let stepInterval: TimeInterval = 0.45
-
     /// Move the focused window `steps` desktops to the right (positive) or left (negative)
     /// on its display, using mouse-drag simulation.
     ///
     /// This replicates the Amethyst 0.22.0+ approach for macOS 15 (Sequoia):
     /// 1. Find the focused window's title bar position via Accessibility API
     /// 2. Simulate mouse-down + drag on the title bar
-    /// 3. Fire the "Move left/right a space" system hotkey `|steps|` times while dragging
+    /// 3. Fire the "Move left/right a space" system hotkey `|steps|` times while dragging,
+    ///    waiting for each desktop switch to register before the next press
     /// 4. Release the mouse — the window lands on the new space
     ///
     /// Ctrl+Left/Right is used instead of "Switch to Desktop N" (Ctrl+N) because on
@@ -1040,15 +1124,6 @@ class WindowMover {
         guard let (_, window) = FocusedWindowResolver.focusedAppAndWindow(preferring: targetApp) else {
             NSLog("[Jumpee:Move] Aborted: no focused window to move")
             return
-        }
-
-        // Temporarily enable the hotkey if it's disabled
-        let wasEnabled = CGSIsSymbolicHotKeyEnabled(symbolicHotKey)
-        if !wasEnabled {
-            _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, true)
-        }
-        func restoreHotKey() {
-            if !wasEnabled { _ = CGSSetSymbolicHotKeyEnabled(symbolicHotKey, false) }
         }
 
         // 3. Find cursor position in the title bar
@@ -1092,7 +1167,6 @@ class WindowMover {
               let upEvent   = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,
                                        mouseCursorPosition: cursorPosition, mouseButton: .left) else {
             NSLog("[Jumpee:Move] Could not create mouse events for the drag simulation")
-            restoreHotKey()
             return
         }
         moveEvent.flags = []
@@ -1105,32 +1179,16 @@ class WindowMover {
         downEvent.post(tap: .cghidEventTap)
         dragEvent.post(tap: .cghidEventTap)
 
-        // 6. Fire the space-switch hotkey once per desktop while the window is held,
-        //    then release the mouse 400ms after the last press.
-        func pressArrow(remaining: Int) {
-            guard remaining > 0 else {
+        // 6. Switch one desktop at a time while the window is held, waiting for each
+        //    switch to register (a press sent mid-animation is dropped), then release
+        //    the mouse 400ms after the last switch.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            SpaceNavigator.pressSpaceArrow(steps: steps, logTag: "Move") { done in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.40) {
                     upEvent.post(tap: .cghidEventTap)
-                    restoreHotKey()
-                    NSLog("[Jumpee:Move] Released window")
+                    NSLog("[Jumpee:Move] Released window after \(done) of \(abs(steps)) desktop(s)")
                 }
-                return
             }
-            if let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true) {
-                keyDown.flags = modifierFlags
-                keyDown.post(tap: .cghidEventTap)
-            }
-            usleep(40_000)
-            if let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) {
-                keyUp.flags = modifierFlags
-                keyUp.post(tap: .cghidEventTap)
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + stepInterval) {
-                pressArrow(remaining: remaining - 1)
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            pressArrow(remaining: abs(steps))
         }
     }
 
@@ -1855,14 +1913,14 @@ class MenuBarController: NSObject {
     /// display (the mover drags with Ctrl+Left/Right, which cannot cross displays).
     private func desktopSteps(toGlobalPosition globalPosition: Int) -> Int? {
         guard let current = spaceDetector.getCurrentSpaceInfo() else {
-            NSLog("[Jumpee:Move] No current space info")
+            NSLog("[Jumpee] No current space info")
             return nil
         }
         let target = spaceDetector.getSpacesByDisplay()
             .first { $0.displayID == current.displayID }?
             .spaces.first { $0.globalPosition == globalPosition }
         guard let target else {
-            NSLog("[Jumpee:Move] Desktop \(globalPosition) is not on the active display")
+            NSLog("[Jumpee] Desktop \(globalPosition) is not on the active display")
             return nil
         }
         return target.localPosition - current.localPosition
@@ -2192,9 +2250,20 @@ class MenuBarController: NSObject {
     private func navigateToSpace(globalPosition: Int) {
         guard let currentInfo = spaceDetector.getCurrentSpaceInfo() else { return }
         if globalPosition != currentInfo.globalPosition {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                SpaceNavigator.navigateToSpace(index: globalPosition)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.switchToSpace(globalPosition: globalPosition)
             }
+        }
+    }
+
+    /// Desktops on the active display are reached with Ctrl+Left/Right steps, which
+    /// macOS 27 honours; Ctrl+N (ignored there when synthesized) is only used for a
+    /// desktop on another display, which the relative shortcut cannot reach.
+    private func switchToSpace(globalPosition: Int) {
+        if let steps = desktopSteps(toGlobalPosition: globalPosition) {
+            SpaceNavigator.navigate(bySteps: steps)
+        } else {
+            SpaceNavigator.navigateToSpace(index: globalPosition)
         }
     }
 
@@ -2203,8 +2272,8 @@ class MenuBarController: NSObject {
         guard let currentInfo = spaceDetector.getCurrentSpaceInfo() else { return }
         if globalPosition != currentInfo.globalPosition {
             statusItem.menu?.cancelTracking()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                SpaceNavigator.navigateToSpace(index: globalPosition)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.switchToSpace(globalPosition: globalPosition)
             }
         }
     }
